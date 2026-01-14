@@ -1,11 +1,14 @@
 ﻿using ActiproRoslynPOC.Models;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Emit;
+using Microsoft.CodeAnalysis.Text;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 
 namespace ActiproRoslynPOC.Services
 {
@@ -143,9 +146,9 @@ namespace ActiproRoslynPOC.Services
             {
                 var fileName = kvp.Key;
                 var code = kvp.Value;
-
+                var sourceText = SourceText.From(code, Encoding.UTF8);
                 var syntaxTree = CSharpSyntaxTree.ParseText(
-                    code,
+                    sourceText,
                     path: fileName  // 设置文件名，用于错误提示
                 );
 
@@ -178,44 +181,48 @@ namespace ActiproRoslynPOC.Services
         /// <summary>
         /// 内部编译方法
         /// </summary>
-        private CompilationResult CompileInternal(
-            IEnumerable<SyntaxTree> syntaxTrees,
-            string assemblyName)
+        private CompilationResult CompileInternal(IEnumerable<SyntaxTree> syntaxTrees, string assemblyName)
         {
             var result = new CompilationResult();
-
             try
             {
+                // 1. 强制使用 Debug 模式
                 var compilation = CSharpCompilation.Create(
                     assemblyName,
                     syntaxTrees,
                     _defaultReferences,
-                    new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
-                );
+                    new CSharpCompilationOptions(
+                        OutputKind.DynamicallyLinkedLibrary,
+                        optimizationLevel: OptimizationLevel.Debug)); // 开启调试优化级别
 
-                using (var ms = new MemoryStream())
+                using (var dllMs = new MemoryStream())
+                using (var pdbMs = new MemoryStream()) // 新增：PDB 内存流
                 {
-                    var emitResult = compilation.Emit(ms);
+                    // 2. 指定 EmitOptions 使用 PortablePdb
+                    var emitOptions = new EmitOptions(debugInformationFormat: DebugInformationFormat.PortablePdb);
+
+                    var emitResult = compilation.Emit(dllMs, pdbMs, options: emitOptions);
                     result.Diagnostics = ConvertDiagnostics(emitResult.Diagnostics);
 
                     if (emitResult.Success)
                     {
-                        ms.Seek(0, SeekOrigin.Begin);
-                        result.AssemblyBytes = ms.ToArray();
-                        result.Assembly = Assembly.Load(result.AssemblyBytes);
+                        dllMs.Seek(0, SeekOrigin.Begin);
+                        pdbMs.Seek(0, SeekOrigin.Begin);
+
+                        result.AssemblyBytes = dllMs.ToArray();
+                        result.PdbBytes = pdbMs.ToArray();  // 保存 PDB 字节数据
+
+                        // 3. 关键：同时加载 DLL 和 PDB 字节
+                        // 这样在异常发生时，StackTrace 就能对应到行号了
+                        result.Assembly = Assembly.Load(result.AssemblyBytes, result.PdbBytes);
                         result.Success = true;
                     }
                 }
             }
             catch (Exception ex)
             {
-                result.Diagnostics.Add(new DiagnosticInfo
-                {
-                    Severity = DiagnosticSeverity.Error,
-                    Message = $"编译异常: {ex.Message}"
-                });
+                result.Diagnostics.Add(new DiagnosticInfo { Severity = DiagnosticSeverity.Error, Message = $"编译异常: {ex.Message}" });
             }
-
             return result;
         }
 

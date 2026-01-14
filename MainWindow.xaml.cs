@@ -67,6 +67,9 @@ namespace ActiproRoslynPOC
             // --- 3.1 设置断点获取回调 ---
             _viewModel.GetBreakpointsFromUI = GetCurrentEditorBreakpoints;
 
+            // --- 3.2 订阅断点切换事件（调试过程中动态修改断点）---
+            DebuggingPointerInputEventSink.BreakpointToggled += OnBreakpointToggled;
+
             // --- 4. 初始化文件列表 ---
             InitializeFileList();
 
@@ -748,6 +751,27 @@ namespace ActiproRoslynPOC
                     editor.ActiveView.Scroller.ScrollLineToVisibleMiddle();
                 }
             }
+        }
+
+        /// <summary>
+        /// 断点切换事件处理（调试过程中动态修改断点）
+        /// </summary>
+        private void OnBreakpointToggled(IEditorDocument document, int lineIndex)
+        {
+            // 只在调试过程中处理
+            if (!_viewModel.IsDebugging)
+                return;
+
+            // 检查当前编辑器是否是被切换断点的文档
+            var editor = GetActiveEditor();
+            if (editor?.Document != document)
+                return;
+
+            // 获取更新后的所有断点
+            var updatedBreakpoints = GetCurrentEditorBreakpoints();
+
+            // 通知 ViewModel 更新调试器中的断点
+            _viewModel.UpdateBreakpoints(updatedBreakpoints);
         }
 
         #endregion

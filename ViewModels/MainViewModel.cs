@@ -20,7 +20,7 @@ namespace ActiproRoslynPOC.ViewModels
         private string _output;
         private readonly RoslynCompilerService _compiler;
         private readonly CodeExecutionService _executor;
-        private readonly DebuggerServiceV3 _debugger;
+        private readonly DebuggerServiceV3Enhanced _debugger;  // PDB 增强版
 
         // 文件追踪
         private string _currentFilePath;
@@ -37,15 +37,18 @@ namespace ActiproRoslynPOC.ViewModels
 
             _compiler = new RoslynCompilerService();
             _executor = new CodeExecutionService();
-            _executor.LogEvent += (s, msg) => AppendOutput(msg);
+            // LogEvent subscription removed - GlobalLogManager handles all logs
 
-            // 初始化调试服务 V3
-            _debugger = new DebuggerServiceV3();
+            // 初始化调试服务 V3 Enhanced (PDB 增强版)
+            _debugger = new DebuggerServiceV3Enhanced();
             _debugger.CurrentLineChanged += OnDebuggerCurrentLineChanged;
             _debugger.BreakpointHit += OnDebuggerBreakpointHit;
             _debugger.DebugSessionEnded += OnDebugSessionEnded;
             _debugger.VariablesUpdated += OnVariablesUpdated;
             _debugger.OutputMessage += (msg) => AppendOutput(msg);
+
+            // --- 订阅全局 Log 管理器 (捕获所有工作流实例的 Log) ---
+            GlobalLogManager.LogReceived += (msg) => AppendOutput(msg);
 
             // --- 新增：重定向 Console 输出 ---
             // 将所有 Console.Write/WriteLine 转发给 AppendOutput 方法
@@ -60,7 +63,7 @@ namespace ActiproRoslynPOC.ViewModels
             OpenFileCommand = new RelayCommand(ExecuteOpenFile);
 
             // 调试命令
-            StartDebugCommand = new RelayCommand(async () => await ExecuteStartDebugAsync(), () => !IsDebugging);
+            StartDebugCommand = new RelayCommand(() => ExecuteStartDebug(), () => !IsDebugging);
             StopDebugCommand = new RelayCommand(ExecuteStopDebug, () => IsDebugging);
             StepOverCommand = new RelayCommand(async () => await ExecuteStepOverAsync(), () => IsDebugging);
             ContinueCommand = new RelayCommand(async () => await ExecuteContinueAsync(), () => IsDebugging);
@@ -257,7 +260,7 @@ namespace ActiproRoslynPOC.ViewModels
                 }
 
                 var workflow = _compiler.CreateInstance<CodedWorkflowBase>(result.Assembly, type.Name);
-                workflow.LogEvent += (s, msg) => AppendOutput(msg);
+                // LogEvent subscription removed - GlobalLogManager handles all logs
 
                 AppendOutput("开始执行...");
                 workflow.Execute();
@@ -336,7 +339,7 @@ namespace ActiproRoslynPOC.ViewModels
                 AppendOutput($"执行类型: {workflowType.Name}");
 
                 var workflow = Activator.CreateInstance(workflowType) as CodedWorkflowBase;
-                workflow.LogEvent += (s, msg) => AppendOutput(msg);
+                // LogEvent subscription removed - GlobalLogManager handles all logs
                 workflow.Execute();
 
                 AppendOutput("执行完成！");
@@ -432,9 +435,20 @@ namespace ActiproRoslynPOC.ViewModels
                     if (_output?.Length > 50000)
                         _output = _output.Substring(20000);
 
-                    // 4. 使用更加显式的赋值逻辑
+                    // 4. 智能添加时间戳：如果消息已经有时间戳格式 [HH:mm:ss]，则不再添加
                     string timestamp = DateTime.Now.ToString("HH:mm:ss");
-                    Output += $"[{timestamp}] {message}{Environment.NewLine}";
+                    bool hasTimestamp = message.StartsWith("[") && message.Length > 10 && message[9] == ']';
+
+                    if (hasTimestamp)
+                    {
+                        // 消息已有时间戳，直接输出
+                        Output += $"{message}{Environment.NewLine}";
+                    }
+                    else
+                    {
+                        // 消息无时间戳，添加时间戳
+                        Output += $"[{timestamp}] {message}{Environment.NewLine}";
+                    }
                 }
                 finally
                 {
@@ -648,20 +662,20 @@ public class SampleWorkflow : CodedWorkflowBase
         #region 调试功能 (DebuggerServiceV3)
 
         /// <summary>
-        /// 开始调试
+        /// 开始调试 (PDB 增强版)
         /// </summary>
-        private async Task ExecuteStartDebugAsync()
+        private async void ExecuteStartDebug()
         {
             try
             {
                 Output = "";
-                AppendOutput("=== 开始调试 ===");
+                AppendOutput("=== 开始调试 (PDB 增强版) ===");
 
                 // 从当前活动编辑器获取断点
                 var breakpoints = GetBreakpointsFromUI?.Invoke() ?? new List<int>();
                 _debugger.SetBreakpoints(breakpoints);
 
-                AppendOutput($"设置了 {breakpoints.Count} 个断点");
+                AppendOutput($"设置了 {breakpoints.Count} 个断点: {string.Join(", ", breakpoints)}");
 
                 // 先保存当前编辑器中的代码（如果有修改）
                 if (IsModified && !string.IsNullOrEmpty(CurrentFilePath))
@@ -670,9 +684,6 @@ public class SampleWorkflow : CodedWorkflowBase
                     ExecuteSave();
                 }
 
-                IsDebugging = true;  // 先设置状态，避免按钮不可点击
-
-                bool success;
                 string projectDirectory = GetProjectDirectory();
 
                 // 检查是否有其他依赖文件（同目录下的其他 .cs 文件）
@@ -715,11 +726,16 @@ public class SampleWorkflow : CodedWorkflowBase
                     codeFiles[CurrentFileName] = Code;
                 }
 
-                // 启动调试：明确指定当前文件为主调试对象
-                // DebuggerServiceV3 会只对 CurrentFilePath 对应的文件进行插桩
-                success = await _debugger.StartDebuggingAsync(codeFiles, _compiler, CurrentFilePath);
+                // 启动调试：PDB 增强版会自动进行智能插桩
+                // 明确指定当前文件为主调试对象
+                bool success = await _debugger.StartDebuggingAsync(codeFiles, _compiler, CurrentFileName);
 
-                if (!success)
+                if (success)
+                {
+                    IsDebugging = true;
+                    AppendOutput("✓ 调试启动成功");
+                }
+                else
                 {
                     AppendOutput("[错误] 调试启动失败");
                     IsDebugging = false;
@@ -728,6 +744,7 @@ public class SampleWorkflow : CodedWorkflowBase
             catch (Exception ex)
             {
                 AppendOutput($"[异常] {ex.Message}");
+                AppendOutput($"堆栈: {ex.StackTrace}");
                 IsDebugging = false;
             }
         }
@@ -804,6 +821,51 @@ public class SampleWorkflow : CodedWorkflowBase
         /// 从 UI 获取断点的委托（由 MainWindow 设置）
         /// </summary>
         public Func<List<int>> GetBreakpointsFromUI { get; set; }
+
+        /// <summary>
+        /// 添加断点（调试过程中动态添加）
+        /// </summary>
+        public void AddBreakpoint(int lineNumber)
+        {
+            if (_debugger.IsDebugging)
+            {
+                _debugger.AddBreakpoint(lineNumber);
+            }
+        }
+
+        /// <summary>
+        /// 移除断点（调试过程中动态移除）
+        /// </summary>
+        public void RemoveBreakpoint(int lineNumber)
+        {
+            if (_debugger.IsDebugging)
+            {
+                _debugger.RemoveBreakpoint(lineNumber);
+            }
+        }
+
+        /// <summary>
+        /// 切换断点状态（调试过程中动态切换）
+        /// </summary>
+        public void ToggleBreakpoint(int lineNumber)
+        {
+            if (_debugger.IsDebugging)
+            {
+                _debugger.ToggleBreakpoint(lineNumber);
+            }
+        }
+
+        /// <summary>
+        /// 更新所有断点（调试过程中批量更新）
+        /// </summary>
+        public void UpdateBreakpoints(List<int> newBreakpoints)
+        {
+            if (_debugger.IsDebugging)
+            {
+                _debugger.SetBreakpoints(newBreakpoints);
+                AppendOutput($"[断点更新] 当前 {newBreakpoints.Count} 个断点: {string.Join(", ", newBreakpoints)}");
+            }
+        }
 
         #endregion
 

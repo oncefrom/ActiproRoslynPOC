@@ -10,6 +10,7 @@ namespace ActiproRoslynPOC.Models
         public bool Success { get; set; }
         public Assembly Assembly { get; set; }
         public byte[] AssemblyBytes { get; set; }
+        public byte[] PdbBytes { get; set; }  // 新增: PDB 字节数据
         public List<DiagnosticInfo> Diagnostics { get; set; } = new List<DiagnosticInfo>();
 
         public string ErrorSummary
