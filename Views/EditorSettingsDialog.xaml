@@ -1,0 +1,117 @@
+<Window x:Class="ActiproRoslynPOC.Views.EditorSettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="编辑器设置"
+        Height="550" Width="450"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <Window.Resources>
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Padding" Value="5"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Margin" Value="5,3"/>
+        </Style>
+        <Style TargetType="Label">
+            <Setter Property="Margin" Value="5,3"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="10">
+
+                <!-- 字体设置 -->
+                <GroupBox Header="字体设置">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition/>
+                                <RowDefinition/>
+                            </Grid.RowDefinitions>
+
+                            <Label Grid.Row="0" Grid.Column="0" Content="字体:"/>
+                            <ComboBox Grid.Row="0" Grid.Column="1" x:Name="fontComboBox"
+                                      Margin="5" IsEditable="True"/>
+
+                            <Label Grid.Row="1" Grid.Column="0" Content="字号:"/>
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                                <Slider x:Name="fontSizeSlider"
+                                        Width="200" Minimum="8" Maximum="32"
+                                        Value="14" TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Margin="5"/>
+                                <TextBlock Text="{Binding ElementName=fontSizeSlider, Path=Value, StringFormat={}{0:F0}}"
+                                           VerticalAlignment="Center" Width="30"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Tab 设置 -->
+                <GroupBox Header="Tab 设置">
+                    <StackPanel>
+                        <CheckBox x:Name="autoConvertTabCheckBox" Content="自动将 Tab 转换为空格"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Label Grid.Column="0" Content="Tab 宽度:"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <Slider x:Name="tabSizeSlider"
+                                        Width="150" Minimum="1" Maximum="8"
+                                        Value="4" TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Margin="5"/>
+                                <TextBlock Text="{Binding ElementName=tabSizeSlider, Path=Value, StringFormat={}{0:F0}}"
+                                           VerticalAlignment="Center" Width="30"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 显示设置 -->
+                <GroupBox Header="显示设置">
+                    <StackPanel>
+                        <CheckBox x:Name="showWhitespaceCheckBox" Content="显示空白字符"/>
+                        <CheckBox x:Name="highlightCurrentLineCheckBox" Content="高亮当前行"/>
+                        <CheckBox x:Name="showGuideLinesCheckBox" Content="显示缩进参考线"/>
+                        <CheckBox x:Name="showLineNumbersCheckBox" Content="显示行号"/>
+                        <CheckBox x:Name="showSelectionMarginCheckBox" Content="显示选择边距"/>
+                        <CheckBox x:Name="showIndicatorMarginCheckBox" Content="显示指示器边距 (断点等)"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 高级功能 -->
+                <GroupBox Header="高级功能">
+                    <StackPanel>
+                        <CheckBox x:Name="showSelectionMatchesCheckBox" Content="选择文本时高亮所有匹配项"/>
+                        <CheckBox x:Name="highlightReferencesCheckBox" Content="高亮光标所在标识符的引用"/>
+                        <CheckBox x:Name="showErrorSquigglesCheckBox" Content="显示错误波浪线"/>
+                        <CheckBox x:Name="enableWordCompletionCheckBox" Content="启用自动补全 (IntelliSense)"/>
+                        <CheckBox x:Name="autoShowParameterInfoCheckBox" Content="自动显示参数信息"/>
+                    </StackPanel>
+                </GroupBox>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 按钮区域 -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="10">
+            <Button x:Name="resetButton" Content="重置默认" Width="80" Margin="5" Click="OnResetClick"/>
+            <Button x:Name="cancelButton" Content="取消" Width="80" Margin="5" Click="OnCancelClick"/>
+            <Button x:Name="okButton" Content="确定" Width="80" Margin="5" Click="OnOkClick" IsDefault="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

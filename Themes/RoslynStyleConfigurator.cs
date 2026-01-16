@@ -35,19 +35,16 @@ namespace ActiproRoslynPOC.Themes
 
             System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] 开始初始化");
 
-            // 创建自定义分类类型（使用简单的字符串键）
-            _usedMethodName = new ClassificationType("Method Name", "Method Name");
-            _classObjectReference = new ClassificationType("Class Name", "Class Name");
-            _interfaceObjectReference = new ClassificationType("Interface Name", "Interface Name");
-            _structureObjectReference = new ClassificationType("Struct Name", "Struct Name");
-            _parametersObjectReference = new ClassificationType("Parameter Name", "Parameter Name");
-
             // 使用 AmbientHighlightingStyleRegistry
             var registry = AmbientHighlightingStyleRegistry.Instance;
 
             // 【调试】先让 DotNetClassificationTypeProvider 注册所有内置分类类型
             var dotNetProvider = new DotNetClassificationTypeProvider();
             dotNetProvider.RegisterAll();
+
+            // 确保分类类型已创建（在 DotNetClassificationTypeProvider 之后）
+            // 这样我们的自定义分类类型不会被覆盖
+            EnsureClassificationTypesCreated();
 
             // 【调试】打印所有已注册的分类类型
             System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] ===== 已注册的分类类型 =====");
@@ -57,7 +54,7 @@ namespace ActiproRoslynPOC.Themes
             }
             System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] ===== 分类类型列表结束 =====");
 
-            // 只注册浅色主题颜色（默认）
+            // 注册浅色主题颜色（重新注册确保生效）
             RegisterLightTheme(registry);
 
             // 注意：不要在初始化时同时注册深色主题，会导致颜色冲突
@@ -68,7 +65,41 @@ namespace ActiproRoslynPOC.Themes
 
             _isInitialized = true;
 
+            // 验证我们的自定义分类类型样式
+            System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] ===== 验证自定义分类类型样式 =====");
+            VerifyCustomStyles(registry);
             System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] 初始化完成（浅色主题），已启用 SyntaxEditorThemeManager");
+        }
+
+        /// <summary>
+        /// 验证自定义分类类型的样式是否正确注册
+        /// </summary>
+        private static void VerifyCustomStyles(IHighlightingStyleRegistry registry)
+        {
+            var types = new[] { _usedMethodName, _classObjectReference, _interfaceObjectReference, _structureObjectReference, _parametersObjectReference };
+            var names = new[] { "UsedMethodName", "ClassObjectReference", "InterfaceObjectReference", "StructureObjectReference", "ParametersObjectReference" };
+
+            for (int i = 0; i < types.Length; i++)
+            {
+                var ct = types[i];
+                if (ct == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RoslynStyleConfigurator] {names[i]}: 分类类型为 null!");
+                    continue;
+                }
+
+                var style = registry[ct];
+                if (style == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RoslynStyleConfigurator] {names[i]} (Key='{ct.Key}'): 样式未找到!");
+                }
+                else
+                {
+                    var fg = style.Foreground.HasValue ? style.Foreground.Value.ToString() : "null";
+                    var bold = style.Bold.HasValue ? style.Bold.Value.ToString() : "null";
+                    System.Diagnostics.Debug.WriteLine($"[RoslynStyleConfigurator] {names[i]} (Key='{ct.Key}'): FG={fg}, Bold={bold}");
+                }
+            }
         }
 
 
@@ -79,38 +110,29 @@ namespace ActiproRoslynPOC.Themes
         {
             var lightColors = _colorCache.GetLightThemeColors();
 
-            // 基础分类类型
-            registry.Register(ClassificationTypes.Keyword, new HighlightingStyle(lightColors["Keyword"]));
-            registry.Register(ClassificationTypes.String, new HighlightingStyle(lightColors["String"]));
-            registry.Register(ClassificationTypes.Comment, new HighlightingStyle(lightColors["Comment"]));
-            registry.Register(ClassificationTypes.Number, new HighlightingStyle(lightColors["Number"]));
-            //registry.Register(ClassificationTypes.Identifier, new HighlightingStyle(lightColors["Identifier"]));
-            registry.Register(ClassificationTypes.Operator, new HighlightingStyle(lightColors["Operator"]));
-            registry.Register(ClassificationTypes.PreprocessorKeyword, new HighlightingStyle(lightColors["PreprocessorKeyword"]));
-            registry.Register(CustomClassificationTypes.UnnecessaryCode, new HighlightingStyle(lightColors["UnnecessaryCode"]));
+            // 基础分类类型 - 使用 overwriteExisting: true 确保覆盖
+            registry.Register(ClassificationTypes.Keyword, new HighlightingStyle(lightColors["Keyword"]), true);
+            registry.Register(ClassificationTypes.String, new HighlightingStyle(lightColors["String"]), true);
+            registry.Register(ClassificationTypes.Comment, new HighlightingStyle(lightColors["Comment"]), true);
+            registry.Register(ClassificationTypes.Number, new HighlightingStyle(lightColors["Number"]), true);
+            //registry.Register(ClassificationTypes.Identifier, new HighlightingStyle(lightColors["Identifier"]), true);
+            registry.Register(ClassificationTypes.Operator, new HighlightingStyle(lightColors["Operator"]), true);
+            registry.Register(ClassificationTypes.PreprocessorKeyword, new HighlightingStyle(lightColors["PreprocessorKeyword"]), true);
+            registry.Register(CustomClassificationTypes.UnnecessaryCode, new HighlightingStyle(lightColors["UnnecessaryCode"]), true);
 
-            // Roslyn 语义分类类型 - 使用 Actipro 的内置 Roslyn 分类类型
-            // 这些是 Roslyn 提供的语义分类，我们只需要为它们注册颜色
-            var methodClassification = new ClassificationType("Method", "Method Name");
-            var classClassification = new ClassificationType("Class", "Class Name");
-            var interfaceClassification = new ClassificationType("Interface Name", "Interface Name");
-            var structClassification = new ClassificationType("Struct Name", "Struct Name");
-            var paramClassification = new ClassificationType("Parameter Name", "Parameter Name");
-            var localVarClassification = new ClassificationType("Local Name", "Local Variable");
-            
-            registry.Register(methodClassification, new HighlightingStyle(lightColors["Identifier"]) { Bold = true });
-            registry.Register(classClassification, new HighlightingStyle(lightColors["Identifier"]));
-            registry.Register(interfaceClassification, new HighlightingStyle(lightColors["InterfaceObjectReference"]));
-            registry.Register(structClassification, new HighlightingStyle(lightColors["StructureObjectReference"]));
-            registry.Register(paramClassification, new HighlightingStyle(lightColors["ParametersObjectReference"]) { Bold = true });
-            registry.Register(localVarClassification, new HighlightingStyle(lightColors["Identifier"]));
+            // 高亮样式 - 使用背景色
+            registry.Register(CustomClassificationTypes.SelectionMatchHighlight,
+                new HighlightingStyle() { Background = lightColors["SelectionMatchHighlight"] }, true);
+            registry.Register(CustomClassificationTypes.ReferenceHighlight,
+                new HighlightingStyle() { Background = lightColors["ReferenceHighlight"] }, true);
 
-            // 自定义分类类型（供 SemanticClassificationTagger 使用）
-            registry.Register(_usedMethodName, new HighlightingStyle(lightColors["UsedMethodName"]) { Bold = true });
-            registry.Register(_classObjectReference, new HighlightingStyle(lightColors["ClassObjectReference"]));
-            registry.Register(_interfaceObjectReference, new HighlightingStyle(lightColors["InterfaceObjectReference"]));
-            registry.Register(_structureObjectReference, new HighlightingStyle(lightColors["StructureObjectReference"]));
-            registry.Register(_parametersObjectReference, new HighlightingStyle(lightColors["ParametersObjectReference"]) { Bold = true });
+            // 自定义分类类型（供 RoslynSemanticClassificationTagger 使用）
+            // 使用正确的颜色配置，使用 overwriteExisting: true 确保覆盖
+            registry.Register(_usedMethodName, new HighlightingStyle(lightColors["UsedMethodName"]) { Bold = true }, true);
+            registry.Register(_classObjectReference, new HighlightingStyle(lightColors["ClassObjectReference"]), true);
+            registry.Register(_interfaceObjectReference, new HighlightingStyle(lightColors["InterfaceObjectReference"]), true);
+            registry.Register(_structureObjectReference, new HighlightingStyle(lightColors["StructureObjectReference"]), true);
+            registry.Register(_parametersObjectReference, new HighlightingStyle(lightColors["ParametersObjectReference"]) { Bold = true }, true);
 
             System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] 浅色主题已注册（包含 Roslyn 语义分类）");
         }
@@ -122,43 +144,28 @@ namespace ActiproRoslynPOC.Themes
         {
             var darkColors = _colorCache.GetDarkThemeColors();
 
-            // 切换到深色调色板
-            //registry.CurrentColorPalette = "Dark";
+            // 基础分类类型 - 使用 overwriteExisting: true 确保覆盖
+            registry.Register(ClassificationTypes.Keyword, new HighlightingStyle(darkColors["Keyword"]), true);
+            registry.Register(ClassificationTypes.String, new HighlightingStyle(darkColors["String"]), true);
+            registry.Register(ClassificationTypes.Comment, new HighlightingStyle(darkColors["Comment"]), true);
+            registry.Register(ClassificationTypes.Number, new HighlightingStyle(darkColors["Number"]), true);
+            registry.Register(ClassificationTypes.Identifier, new HighlightingStyle(darkColors["Identifier"]), true);
+            registry.Register(ClassificationTypes.Operator, new HighlightingStyle(darkColors["Operator"]), true);
+            registry.Register(ClassificationTypes.PreprocessorKeyword, new HighlightingStyle(darkColors["PreprocessorKeyword"]), true);
+            registry.Register(CustomClassificationTypes.UnnecessaryCode, new HighlightingStyle(darkColors["UnnecessaryCode"]), true);
 
-            // 基础分类类型
-            registry.Register(ClassificationTypes.Keyword, new HighlightingStyle(darkColors["Keyword"]));
-            registry.Register(ClassificationTypes.String, new HighlightingStyle(darkColors["String"]));
-            registry.Register(ClassificationTypes.Comment, new HighlightingStyle(darkColors["Comment"]));
-            registry.Register(ClassificationTypes.Number, new HighlightingStyle(darkColors["Number"]));
-            registry.Register(ClassificationTypes.Identifier, new HighlightingStyle(darkColors["Identifier"]));
-            registry.Register(ClassificationTypes.Operator, new HighlightingStyle(darkColors["Operator"]));
-            registry.Register(ClassificationTypes.PreprocessorKeyword, new HighlightingStyle(darkColors["PreprocessorKeyword"]));
-            registry.Register(CustomClassificationTypes.UnnecessaryCode, new HighlightingStyle(darkColors["UnnecessaryCode"]));
+            // 高亮样式 - 使用背景色
+            registry.Register(CustomClassificationTypes.SelectionMatchHighlight,
+                new HighlightingStyle() { Background = darkColors["SelectionMatchHighlight"] }, true);
+            registry.Register(CustomClassificationTypes.ReferenceHighlight,
+                new HighlightingStyle() { Background = darkColors["ReferenceHighlight"] }, true);
 
-            // Roslyn 语义分类类型 - 使用 Actipro 的内置 Roslyn 分类类型
-            var methodClassification = new ClassificationType("method name", "Method Name");
-            var classClassification = new ClassificationType("class name", "Class Name");
-            var interfaceClassification = new ClassificationType("interface name", "Interface Name");
-            var structClassification = new ClassificationType("struct name", "Struct Name");
-            var paramClassification = new ClassificationType("parameter name", "Parameter Name");
-            var localVarClassification = new ClassificationType("local name", "Local Variable");
-
-            registry.Register(methodClassification, new HighlightingStyle(darkColors["UsedMethodName"]) { Bold = true });
-            registry.Register(classClassification, new HighlightingStyle(darkColors["ClassObjectReference"]));
-            registry.Register(interfaceClassification, new HighlightingStyle(darkColors["InterfaceObjectReference"]));
-            registry.Register(structClassification, new HighlightingStyle(darkColors["StructureObjectReference"]));
-            registry.Register(paramClassification, new HighlightingStyle(darkColors["ParametersObjectReference"]) { Bold = true });
-            registry.Register(localVarClassification, new HighlightingStyle(darkColors["Identifier"]));
-
-            // 自定义分类类型（供 SemanticClassificationTagger 使用）
-            registry.Register(_usedMethodName, new HighlightingStyle(darkColors["UsedMethodName"]) { Bold = true });
-            registry.Register(_classObjectReference, new HighlightingStyle(darkColors["ClassObjectReference"]));
-            registry.Register(_interfaceObjectReference, new HighlightingStyle(darkColors["InterfaceObjectReference"]));
-            registry.Register(_structureObjectReference, new HighlightingStyle(darkColors["StructureObjectReference"]));
-            registry.Register(_parametersObjectReference, new HighlightingStyle(darkColors["ParametersObjectReference"]) { Bold = true });
-
-            // 切换回浅色调色板（默认）
-            //registry.CurrentColorPalette = "Light";
+            // 自定义分类类型（供 RoslynSemanticClassificationTagger 使用）
+            registry.Register(_usedMethodName, new HighlightingStyle(darkColors["UsedMethodName"]) { Bold = true }, true);
+            registry.Register(_classObjectReference, new HighlightingStyle(darkColors["ClassObjectReference"]), true);
+            registry.Register(_interfaceObjectReference, new HighlightingStyle(darkColors["InterfaceObjectReference"]), true);
+            registry.Register(_structureObjectReference, new HighlightingStyle(darkColors["StructureObjectReference"]), true);
+            registry.Register(_parametersObjectReference, new HighlightingStyle(darkColors["ParametersObjectReference"]) { Bold = true }, true);
 
             System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] 深色主题已注册（包含 Roslyn 语义分类）");
         }
@@ -185,11 +192,99 @@ namespace ActiproRoslynPOC.Themes
 
         /// <summary>
         /// 获取自定义分类类型（供 tagger 使用）
+        /// 使用延迟初始化确保分类类型始终可用
         /// </summary>
-        public static IClassificationType UsedMethodName => _usedMethodName;
-        public static IClassificationType ClassObjectReference => _classObjectReference;
-        public static IClassificationType InterfaceObjectReference => _interfaceObjectReference;
-        public static IClassificationType StructureObjectReference => _structureObjectReference;
-        public static IClassificationType ParametersObjectReference => _parametersObjectReference;
+        public static IClassificationType UsedMethodName
+        {
+            get
+            {
+                EnsureClassificationTypesCreated();
+                return _usedMethodName;
+            }
+        }
+
+        public static IClassificationType ClassObjectReference
+        {
+            get
+            {
+                EnsureClassificationTypesCreated();
+                return _classObjectReference;
+            }
+        }
+
+        public static IClassificationType InterfaceObjectReference
+        {
+            get
+            {
+                EnsureClassificationTypesCreated();
+                return _interfaceObjectReference;
+            }
+        }
+
+        public static IClassificationType StructureObjectReference
+        {
+            get
+            {
+                EnsureClassificationTypesCreated();
+                return _structureObjectReference;
+            }
+        }
+
+        public static IClassificationType ParametersObjectReference
+        {
+            get
+            {
+                EnsureClassificationTypesCreated();
+                return _parametersObjectReference;
+            }
+        }
+
+        /// <summary>
+        /// 确保分类类型已创建（延迟初始化）
+        /// 并注册到 AmbientHighlightingStyleRegistry
+        /// </summary>
+        private static void EnsureClassificationTypesCreated()
+        {
+            if (_usedMethodName != null)
+                return; // 已初始化
+
+            var colorCache = new ThemeAwareColorCache();
+            var lightColors = colorCache.GetLightThemeColors();
+            var registry = AmbientHighlightingStyleRegistry.Instance;
+
+            // 创建分类类型
+            _usedMethodName = new ClassificationType("Method Name", "Method Name");
+            _classObjectReference = new ClassificationType("Class Name", "Class Name");
+            _interfaceObjectReference = new ClassificationType("Interface Name", "Interface Name");
+            _structureObjectReference = new ClassificationType("Struct Name", "Struct Name");
+            _parametersObjectReference = new ClassificationType("Parameter Name", "Parameter Name");
+
+            // 立即注册样式（确保在 Tagger 使用前就已注册）
+            var methodStyle = new HighlightingStyle(lightColors["UsedMethodName"]) { Bold = true };
+            var classStyle = new HighlightingStyle(lightColors["ClassObjectReference"]);
+            var interfaceStyle = new HighlightingStyle(lightColors["InterfaceObjectReference"]);
+            var structStyle = new HighlightingStyle(lightColors["StructureObjectReference"]);
+            var paramStyle = new HighlightingStyle(lightColors["ParametersObjectReference"]) { Bold = true };
+
+            registry.Register(_usedMethodName, methodStyle, true);
+            registry.Register(_classObjectReference, classStyle, true);
+            registry.Register(_interfaceObjectReference, interfaceStyle, true);
+            registry.Register(_structureObjectReference, structStyle, true);
+            registry.Register(_parametersObjectReference, paramStyle, true);
+
+            // 验证注册结果
+            System.Diagnostics.Debug.WriteLine($"[RoslynStyleConfigurator] 样式注册验证:");
+            System.Diagnostics.Debug.WriteLine($"  - Method Name: FG={methodStyle.Foreground}, Bold={methodStyle.Bold}");
+            System.Diagnostics.Debug.WriteLine($"  - Class Name: FG={classStyle.Foreground}");
+            System.Diagnostics.Debug.WriteLine($"  - Interface Name: FG={interfaceStyle.Foreground}");
+            System.Diagnostics.Debug.WriteLine($"  - Struct Name: FG={structStyle.Foreground}");
+            System.Diagnostics.Debug.WriteLine($"  - Parameter Name: FG={paramStyle.Foreground}, Bold={paramStyle.Bold}");
+
+            // 验证从 registry 能否取回样式
+            var retrievedStyle = registry[_usedMethodName];
+            System.Diagnostics.Debug.WriteLine($"  - 从 Registry 取回 Method Name 样式: {(retrievedStyle != null ? $"FG={retrievedStyle.Foreground}" : "null")}");
+
+            System.Diagnostics.Debug.WriteLine("[RoslynStyleConfigurator] 自定义分类类型已创建并注册样式");
+        }
     }
 }

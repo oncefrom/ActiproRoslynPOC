@@ -1,6 +1,8 @@
 using ActiproRoslynPOC.ViewModels;
 using ActiproRoslynPOC.Themes;
 using ActiproRoslynPOC.Debugging;
+using ActiproRoslynPOC.Settings;
+using ActiproRoslynPOC.Views;
 using ActiproSoftware.Text;
 using ActiproSoftware.Text.Languages.CSharp.Implementation;
 using ActiproSoftware.Text.Languages.DotNet;
@@ -9,17 +11,20 @@ using ActiproSoftware.Text.Languages.DotNet.Reflection;
 using ActiproSoftware.Text.Languages.DotNet.Reflection.Implementation;
 using ActiproSoftware.Text.Parsing;
 using ActiproSoftware.Text.Parsing.LLParser;
+using ActiproSoftware.Text.Searching;
 using ActiproSoftware.Text.Tagging.Implementation;
 using ActiproSoftware.Windows.Controls.Docking;
 using ActiproSoftware.Windows.Controls.SyntaxEditor;
 using ActiproSoftware.Windows.Controls.SyntaxEditor.Adornments.Implementation;
 using ActiproSoftware.Windows.Controls.SyntaxEditor.Highlighting;
+using ActiproSoftware.Windows.Controls.SyntaxEditor.Implementation;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -32,6 +37,13 @@ namespace ActiproRoslynPOC
         private IProjectAssembly _projectAssembly;
         private CSharpSyntaxLanguage _csharpLanguage;
         private UsingDirectiveTaggerProvider _usingTaggerProvider;
+
+        // 新增: 高亮 Tagger Providers
+        private HighlightSelectionMatchesTaggerProvider _selectionMatchesTaggerProvider;
+        private HighlightReferencesTaggerProvider _referencesTaggerProvider;
+
+        // 新增: Roslyn 语义分类 Tagger Provider
+        private RoslynSemanticClassificationTaggerProvider _roslynSemanticTaggerProvider;
 
         // 多文档管理：存储打开的文档 <文件路径, DocumentWindow>
         private Dictionary<string, DocumentWindow> _openDocuments = new Dictionary<string, DocumentWindow>(StringComparer.OrdinalIgnoreCase);
@@ -51,6 +63,9 @@ namespace ActiproRoslynPOC
 
             // --- 2. 初始化自定义 Tagger Provider ---
             _usingTaggerProvider = new UsingDirectiveTaggerProvider();
+            _selectionMatchesTaggerProvider = new HighlightSelectionMatchesTaggerProvider();
+            _referencesTaggerProvider = new HighlightReferencesTaggerProvider();
+            _roslynSemanticTaggerProvider = new RoslynSemanticClassificationTaggerProvider();
 
             // --- 2.1 初始化 Roslyn 样式配置（使用 VS Settings 导入方式）---
             RoslynStyleConfigurator.Initialize();
@@ -151,12 +166,26 @@ namespace ActiproRoslynPOC
                 _csharpLanguage.RegisterService(_usingTaggerProvider);
             }
 
-            // 【已禁用】语义分类 Tagger Provider（用于方法名、类名等细粒度高亮）
-            // 效果不理想，暂时禁用
-            // var semanticTaggerProvider = new SemanticClassificationTaggerProvider();
-            // _csharpLanguage.RegisterService(semanticTaggerProvider);
+            // 注册选择匹配高亮 Tagger Provider
+            if (_selectionMatchesTaggerProvider != null)
+            {
+                _csharpLanguage.RegisterService(_selectionMatchesTaggerProvider);
+                System.Diagnostics.Debug.WriteLine("[MainWindow] 选择匹配高亮 Tagger 已注册");
+            }
 
-            System.Diagnostics.Debug.WriteLine("[MainWindow] 语义分类 Tagger 已禁用，仅使用基础词法高亮");
+            // 注册引用高亮 Tagger Provider
+            if (_referencesTaggerProvider != null)
+            {
+                _csharpLanguage.RegisterService(_referencesTaggerProvider);
+                System.Diagnostics.Debug.WriteLine("[MainWindow] 引用高亮 Tagger 已注册");
+            }
+
+            // 注册 Roslyn 语义分类 Tagger Provider（基于 SemanticModel 的精确高亮）
+            if (_roslynSemanticTaggerProvider != null)
+            {
+                _csharpLanguage.RegisterService(_roslynSemanticTaggerProvider);
+                System.Diagnostics.Debug.WriteLine("[MainWindow] Roslyn 语义分类 Tagger 已注册（基于 SemanticModel）");
+            }
 
             // --- 注册调试功能服务 ---
             // 注册调试指针输入事件处理（点击左侧边栏切换断点）
@@ -323,6 +352,9 @@ namespace ActiproRoslynPOC
                 BorderThickness = new Thickness(0)
             };
 
+            // 应用编辑器设置
+            CodeEditorSettingsService.Instance.ApplySettings(editor);
+
             // 应用编辑器主题背景
             EditorThemeManager.ApplyEditorBackground(editor);
 
@@ -340,10 +372,16 @@ namespace ActiproRoslynPOC
                 OnDocumentTextChanged(filePath, editor);
             };
 
-            // 监听光标位置变化
+            // 监听光标位置变化和选择变化
             editor.ViewSelectionChanged += (s, e) =>
             {
                 UpdateStatusBar(editor);
+
+                // 处理选择匹配高亮
+                HandleSelectionMatchHighlight(editor, e);
+
+                // 处理引用高亮
+                HandleReferenceHighlight(editor, e);
             };
 
             // 创建文档窗口
@@ -645,6 +683,164 @@ namespace ActiproRoslynPOC
             }
 
             AppendOutput($"[主题] 已切换到{(EditorThemeManager.IsDarkTheme ? "深色" : "浅色")}主题");
+        }
+
+        /// <summary>
+        /// 设置按钮点击事件
+        /// </summary>
+        private void OnSettingsClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new EditorSettingsDialog
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                // 保存设置
+                CodeEditorSettingsService.Instance.Settings = dialog.Settings;
+                CodeEditorSettingsService.Instance.SaveSettings();
+
+                // 应用到所有打开的编辑器
+                foreach (var kvp in _openDocuments)
+                {
+                    var editor = kvp.Value.Content as SyntaxEditor;
+                    if (editor != null)
+                    {
+                        CodeEditorSettingsService.Instance.ApplySettings(editor);
+                    }
+                }
+
+                AppendOutput("[设置] 编辑器设置已更新");
+            }
+        }
+
+        #endregion
+
+        #region 选择匹配高亮和引用高亮
+
+        /// <summary>
+        /// 处理选择匹配高亮
+        /// </summary>
+        private void HandleSelectionMatchHighlight(SyntaxEditor editor, EditorViewSelectionEventArgs e)
+        {
+            var settings = CodeEditorSettingsService.Instance.Settings;
+            if (!settings.ShowSelectionMatches)
+                return;
+
+            // 获取或创建 Tagger
+            if (!editor.Document.Properties.TryGetValue<HighlightSelectionMatchesTagger>(
+                typeof(HighlightSelectionMatchesTagger), out var tagger))
+            {
+                return;
+            }
+
+            // 清除之前的高亮
+            tagger.Clear();
+
+            // 检查是否有选择
+            if (e.View.Selection.IsZeroLength)
+                return;
+
+            // 获取选择的文本
+            string selectedText = e.View.SelectedText?.Trim();
+            if (string.IsNullOrEmpty(selectedText) || selectedText.Length < 2)
+                return;
+
+            // 避免选择整行或太长的文本
+            if (selectedText.Contains('\n') || selectedText.Length > 100)
+                return;
+
+            try
+            {
+                // 使用搜索功能查找所有匹配
+                var options = new EditorSearchOptions
+                {
+                    FindText = selectedText,
+                    PatternProvider = SearchPatternProviders.Normal,
+                    MatchWholeWord = false,
+                    MatchCase = true
+                };
+
+                var searchResults = e.View.Searcher.FindAll(options);
+                if (searchResults?.Results != null)
+                {
+                    foreach (var result in searchResults.Results)
+                    {
+                        // 跳过当前选择的范围
+                        if (result.FindSnapshotRange.StartOffset == e.View.Selection.StartOffset)
+                            continue;
+
+                        tagger.HighlightRange(result.FindSnapshotRange, EditorThemeManager.IsDarkTheme);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MainWindow] 选择匹配高亮失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 处理引用高亮
+        /// </summary>
+        private void HandleReferenceHighlight(SyntaxEditor editor, EditorViewSelectionEventArgs e)
+        {
+            var settings = CodeEditorSettingsService.Instance.Settings;
+            if (!settings.HighlightReferences)
+                return;
+
+            // 获取或创建 Tagger
+            if (!editor.Document.Properties.TryGetValue<HighlightReferencesTagger>(
+                typeof(HighlightReferencesTagger), out var tagger))
+            {
+                return;
+            }
+
+            // 清除之前的高亮
+            tagger.Clear();
+
+            // 如果有选择文本，则不处理引用高亮（让选择匹配高亮处理）
+            if (!e.View.Selection.IsZeroLength)
+                return;
+
+            try
+            {
+                // 获取光标所在的当前词
+                var currentWordRange = e.View.GetCurrentWordTextRange();
+                if (currentWordRange.IsZeroLength || currentWordRange.Length < 2)
+                    return;
+
+                string currentWord = e.View.GetCurrentWordText();
+                if (string.IsNullOrEmpty(currentWord))
+                    return;
+
+                // 只处理标识符（以字母或下划线开头）
+                if (!char.IsLetter(currentWord[0]) && currentWord[0] != '_')
+                    return;
+
+                // 使用正则表达式匹配完整单词
+                var options = new EditorSearchOptions
+                {
+                    FindText = currentWord,
+                    PatternProvider = SearchPatternProviders.Normal,
+                    MatchWholeWord = true,
+                    MatchCase = true
+                };
+
+                var searchResults = e.View.Searcher.FindAll(options);
+                if (searchResults?.Results != null && searchResults.Results.Count > 1)
+                {
+                    foreach (var result in searchResults.Results)
+                    {
+                        tagger.HighlightRange(result.FindSnapshotRange, EditorThemeManager.IsDarkTheme);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MainWindow] 引用高亮失败: {ex.Message}");
+            }
         }
 
         #endregion

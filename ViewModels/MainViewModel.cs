@@ -32,6 +32,11 @@ namespace ActiproRoslynPOC.ViewModels
         private int _currentDebugLine = -1;
         private string _variablesText;
 
+        // 工作流参数
+        private readonly WorkflowParameterService _parameterService = new WorkflowParameterService();
+        private WorkflowSignatureInfo _currentWorkflowSignature;
+        private Dictionary<string, string> _workflowArguments = new Dictionary<string, string>();
+
         public MainViewModel()
         {
 
@@ -159,6 +164,98 @@ namespace ActiproRoslynPOC.ViewModels
         public ICommand StepOverCommand { get; }
         public ICommand ContinueCommand { get; }
 
+        // 工作流参数属性
+        public WorkflowSignatureInfo CurrentWorkflowSignature
+        {
+            get => _currentWorkflowSignature;
+            set
+            {
+                _currentWorkflowSignature = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasWorkflowParameters));
+            }
+        }
+
+        public bool HasWorkflowParameters => CurrentWorkflowSignature?.HasCustomParameters == true;
+
+        public Dictionary<string, string> WorkflowArguments
+        {
+            get => _workflowArguments;
+            set
+            {
+                _workflowArguments = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// 分析当前代码的工作流签名
+        /// </summary>
+        public void AnalyzeWorkflowSignature()
+        {
+            try
+            {
+                // 获取项目目录中的所有代码文件
+                var codeFiles = new Dictionary<string, string>();
+                var projectDirectory = GetProjectDirectory();
+
+                if (!string.IsNullOrEmpty(projectDirectory) && Directory.Exists(projectDirectory))
+                {
+                    var csFiles = Directory.GetFiles(projectDirectory, "*.cs", SearchOption.AllDirectories);
+                    foreach (var filePath in csFiles)
+                    {
+                        var fileName = Path.GetFileName(filePath);
+                        codeFiles[fileName] = File.ReadAllText(filePath);
+                    }
+                }
+                else
+                {
+                    // 单文件模式
+                    codeFiles[CurrentFileName ?? "main.cs"] = Code;
+                }
+
+                var result = _compiler.CompileMultiple(codeFiles);
+
+                if (result.Success)
+                {
+                    var workflowType = result.Assembly.GetTypes()
+                        .FirstOrDefault(t => t.IsSubclassOf(typeof(CodedWorkflowBase)) && !t.IsAbstract);
+
+                    if (workflowType != null)
+                    {
+                        CurrentWorkflowSignature = _parameterService.GetWorkflowSignature(workflowType);
+
+                        if (CurrentWorkflowSignature.HasCustomParameters)
+                        {
+                            AppendOutput($"[参数分析] 检测到工作流参数:");
+                            foreach (var param in CurrentWorkflowSignature.InputParameters)
+                            {
+                                var defaultInfo = param.HasDefaultValue ? $" = {param.DefaultValue}" : " (必填)";
+                                AppendOutput($"  - {param.TypeDisplayName} {param.Name}{defaultInfo}");
+                            }
+
+                            if (CurrentWorkflowSignature.HasReturnValue)
+                            {
+                                AppendOutput($"  返回类型: {CurrentWorkflowSignature.ReturnTypeDisplayName}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AnalyzeWorkflowSignature] 分析失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 设置工作流参数
+        /// </summary>
+        public void SetWorkflowArgument(string name, string value)
+        {
+            _workflowArguments[name] = value;
+        }
+
         // 调试状态属性
         public bool IsDebugging
         {
@@ -262,13 +359,16 @@ namespace ActiproRoslynPOC.ViewModels
                 var workflow = _compiler.CreateInstance<CodedWorkflowBase>(result.Assembly, type.Name);
                 // LogEvent subscription removed - GlobalLogManager handles all logs
 
+                // 设置工作流参数
+                SetWorkflowArgumentsFromUI(workflow);
+
                 AppendOutput("开始执行...");
                 workflow.Execute();
 
                 sw.Stop();
                 AppendOutput($"执行完成，耗时 {sw.ElapsedMilliseconds}ms");
                 if (workflow.Result != null)
-                    AppendOutput($"返回结果: {workflow.Result}");
+                    AppendOutput($"返回结果: {FormatResult(workflow.Result)}");
             }
             catch (Exception ex)
             {
@@ -340,16 +440,78 @@ namespace ActiproRoslynPOC.ViewModels
 
                 var workflow = Activator.CreateInstance(workflowType) as CodedWorkflowBase;
                 // LogEvent subscription removed - GlobalLogManager handles all logs
+
+                // 设置工作流参数
+                SetWorkflowArgumentsFromUI(workflow);
+
                 workflow.Execute();
 
                 AppendOutput("执行完成！");
                 if (workflow.Result != null)
-                    AppendOutput($"返回结果: {workflow.Result}");
+                    AppendOutput($"返回结果: {FormatResult(workflow.Result)}");
             }
             catch (Exception ex)
             {
                 AppendOutput($"[异常] {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// 从 UI 设置的参数传递给工作流实例
+        /// </summary>
+        private void SetWorkflowArgumentsFromUI(CodedWorkflowBase workflow)
+        {
+            if (workflow == null) return;
+
+            // 初始化 Services（支持 services.WorkflowInvocationService.RunWorkflow）
+            var projectDirectory = GetProjectDirectory();
+            workflow.Services = new WorkflowServices(projectDirectory);
+
+            // 获取工作流签名
+            var signature = _parameterService.GetWorkflowSignature(workflow.GetType());
+            if (signature == null || !signature.HasCustomParameters) return;
+
+            // 将 UI 中设置的参数值传递给工作流
+            foreach (var param in signature.InputParameters)
+            {
+                if (_workflowArguments.TryGetValue(param.Name, out var stringValue))
+                {
+                    var convertedValue = _parameterService.ConvertValue(stringValue, param.ParameterType);
+                    workflow.Arguments[param.Name] = convertedValue;
+                    AppendOutput($"[参数] {param.Name} = {convertedValue}");
+                }
+                else if (param.HasDefaultValue)
+                {
+                    workflow.Arguments[param.Name] = param.DefaultValue;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 格式化返回结果（支持元组显示）
+        /// </summary>
+        private string FormatResult(object result)
+        {
+            if (result == null) return "<null>";
+
+            var type = result.GetType();
+
+            // 处理元组类型
+            if (type.IsGenericType && type.Name.StartsWith("ValueTuple"))
+            {
+                var fields = type.GetFields();
+                var values = new List<string>();
+
+                foreach (var field in fields)
+                {
+                    var value = field.GetValue(result);
+                    values.Add($"{field.Name}: {value}");
+                }
+
+                return $"({string.Join(", ", values)})";
+            }
+
+            return result.ToString();
         }
 
         /// <summary>
@@ -725,6 +887,24 @@ public class SampleWorkflow : CodedWorkflowBase
                     // 单文件模式：只有当前文件
                     codeFiles[CurrentFileName] = Code;
                 }
+
+                // 设置工作流参数（从 UI 获取）
+                var debugArguments = new Dictionary<string, object>();
+                if (CurrentWorkflowSignature?.HasCustomParameters == true)
+                {
+                    foreach (var param in CurrentWorkflowSignature.InputParameters)
+                    {
+                        if (_workflowArguments.TryGetValue(param.Name, out var stringValue))
+                        {
+                            debugArguments[param.Name] = _parameterService.ConvertValue(stringValue, param.ParameterType);
+                        }
+                        else if (param.HasDefaultValue)
+                        {
+                            debugArguments[param.Name] = param.DefaultValue;
+                        }
+                    }
+                }
+                _debugger.SetWorkflowArguments(debugArguments);
 
                 // 启动调试：PDB 增强版会自动进行智能插桩
                 // 明确指定当前文件为主调试对象

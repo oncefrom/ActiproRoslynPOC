@@ -28,6 +28,9 @@ namespace ActiproRoslynPOC.Services
         private string _mainFileName;
         private TaskCompletionSource<bool> _pauseSignal;
 
+        // 工作流参数
+        private Dictionary<string, object> _workflowArguments = new Dictionary<string, object>();
+
         // 事件
         public event Action<int> CurrentLineChanged;
         public event Action<int> BreakpointHit;
@@ -91,6 +94,14 @@ namespace ActiproRoslynPOC.Services
         public IEnumerable<int> GetBreakpoints()
         {
             return _breakpoints.ToList();
+        }
+
+        /// <summary>
+        /// 设置工作流参数（调试执行前调用）
+        /// </summary>
+        public void SetWorkflowArguments(Dictionary<string, object> arguments)
+        {
+            _workflowArguments = arguments ?? new Dictionary<string, object>();
         }
 
         /// <summary>
@@ -366,6 +377,23 @@ namespace ActiproRoslynPOC.Services
 
                 _workflowInstance = Activator.CreateInstance(workflowType);
 
+                // 设置 Arguments 和 Services
+                if (_workflowInstance is CodedWorkflowBase workflowBase)
+                {
+                    // 初始化 Services（支持 services.WorkflowInvocationService.RunWorkflow）
+                    workflowBase.Services = new WorkflowServices(@"E:\ai_app\actipro_rpa\TestWorkflows");
+
+                    // 传递工作流参数
+                    if (_workflowArguments.Count > 0)
+                    {
+                        foreach (var kvp in _workflowArguments)
+                        {
+                            workflowBase.Arguments[kvp.Key] = kvp.Value;
+                            OutputMessage?.Invoke($"[参数] {kvp.Key} = {kvp.Value}");
+                        }
+                    }
+                }
+
                 var callbackField = workflowType.GetField("__debugCallback", BindingFlags.Public | BindingFlags.Static);
                 if (callbackField != null)
                 {
@@ -373,10 +401,17 @@ namespace ActiproRoslynPOC.Services
                     callbackField.SetValue(null, callback);
                 }
 
-                var executeMethod = workflowType.GetMethod("Execute");
+                // 调用无参数的 Execute()，基类会自动处理参数传递和返回值
+                var executeMethod = workflowType.GetMethod("Execute", Type.EmptyTypes);
                 if (executeMethod != null)
                 {
                     executeMethod.Invoke(_workflowInstance, null);
+                }
+                else
+                {
+                    // 如果没有无参数的 Execute，尝试调用基类的 Execute
+                    var baseExecute = typeof(CodedWorkflowBase).GetMethod("Execute");
+                    baseExecute?.Invoke(_workflowInstance, null);
                 }
 
                 StopDebugging();
@@ -553,7 +588,13 @@ namespace ActiproRoslynPOC.Services
 
             public override SyntaxNode VisitMethodDeclaration(MethodDeclarationSyntax node)
             {
-                if (node.Identifier.Text != "Execute")
+                // 检查方法是否有 [Workflow] 特性
+                bool hasWorkflowAttribute = node.AttributeLists
+                    .SelectMany(al => al.Attributes)
+                    .Any(a => a.Name.ToString() == "Workflow" || a.Name.ToString() == "WorkflowAttribute");
+
+                // 只对带有 [Workflow] 特性的方法进行插桩
+                if (!hasWorkflowAttribute)
                     return base.VisitMethodDeclaration(node);
 
                 if (node.Body == null)
@@ -631,7 +672,13 @@ namespace ActiproRoslynPOC.Services
 
             public override SyntaxNode VisitMethodDeclaration(MethodDeclarationSyntax node)
             {
-                if (node.Identifier.Text != "Execute")
+                // 检查方法是否有 [Workflow] 特性
+                bool hasWorkflowAttribute = node.AttributeLists
+                    .SelectMany(al => al.Attributes)
+                    .Any(a => a.Name.ToString() == "Workflow" || a.Name.ToString() == "WorkflowAttribute");
+
+                // 只对带有 [Workflow] 特性的方法进行插桩
+                if (!hasWorkflowAttribute)
                     return base.VisitMethodDeclaration(node);
 
                 if (node.Body == null)
