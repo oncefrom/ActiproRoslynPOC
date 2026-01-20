@@ -9,6 +9,9 @@ namespace ActiproRoslynPOC.Models
         public DiagnosticSeverity Severity { get; set; }
         public int Line { get; set; }
         public int Column { get; set; }
+        public string FileName { get; set; }
+
+        public bool IsError => Severity == DiagnosticSeverity.Error;
 
         public string SeverityText
         {

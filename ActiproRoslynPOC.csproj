@@ -51,6 +51,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Activities.Core.Presentation" />
     <Reference Include="System.Data" />
     <Reference Include="System.Numerics" />
     <Reference Include="System.Xml" />
@@ -75,8 +76,17 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="Activities\InvokeCodedWorkflow.cs" />
+    <Compile Include="Activities\InvokeCodedWorkflowDesigner.xaml.cs">
+      <DependentUpon>InvokeCodedWorkflowDesigner.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Activities\InvokeWorkflow.cs" />
+    <Compile Include="Activities\InvokeWorkflowDesigner.xaml.cs">
+      <DependentUpon>InvokeWorkflowDesigner.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Services\CodeExecutionService.cs" />
     <Compile Include="Services\ConsoleRedirectWriter.cs" />
+    <Compile Include="Services\CSharpFileAnalyzer.cs" />
     <Compile Include="Services\DebuggerServiceV3.cs" />
     <Compile Include="Services\DebuggerServiceV3Enhanced.cs" />
     <Compile Include="Services\GlobalLogManager.cs" />
@@ -97,6 +107,8 @@
     <Compile Include="Themes\RoslynSemanticClassificationTagger.cs" />
     <Compile Include="Themes\RoslynSemanticClassificationTaggerProvider.cs" />
     <Compile Include="Themes\RoslynStyleConfigurator.cs" />
+    <Compile Include="Themes\RoslynTokenTagger.cs" />
+    <Compile Include="Themes\RoslynTokenTaggerProvider.cs" />
     <Compile Include="Themes\SemanticClassificationTagger.cs" />
     <Compile Include="Themes\SemanticClassificationTaggerProvider.cs" />
     <Compile Include="Themes\ThemeAwareColorCache.cs" />
@@ -112,6 +124,18 @@
     <Compile Include="ViewModels\MainViewModel.cs" />
     <Compile Include="Views\EditorSettingsDialog.xaml.cs">
       <DependentUpon>EditorSettingsDialog.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\InvokeWorkflowDialog.xaml.cs">
+      <DependentUpon>InvokeWorkflowDialog.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\ArgumentEditorDialog.xaml.cs">
+      <DependentUpon>ArgumentEditorDialog.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\SimpleArgumentEditorDialog.xaml.cs">
+      <DependentUpon>SimpleArgumentEditorDialog.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Views\WorkflowArgumentEditorDialog.xaml.cs">
+      <DependentUpon>WorkflowArgumentEditorDialog.xaml</DependentUpon>
     </Compile>
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
@@ -129,12 +153,39 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="Views\InvokeWorkflowDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\ArgumentEditorDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\SimpleArgumentEditorDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Views\WorkflowArgumentEditorDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Activities\InvokeCodedWorkflowDesigner.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="Activities\InvokeWorkflowDesigner.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Models\CodedWorkflowBase.cs" />
     <Compile Include="Models\CompilationResult.cs" />
     <Compile Include="Models\DiagnosticInfo.cs" />
     <Compile Include="Models\ExecutionTrace.cs" />
+    <Compile Include="Models\FileTreeNode.cs" />
+    <Compile Include="Models\ProjectConfig.cs" />
+    <Compile Include="Services\ProjectService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>
     </Compile>
@@ -179,8 +230,17 @@
     <PackageReference Include="Microsoft.Diagnostics.Runtime">
       <Version>3.1.512801</Version>
     </PackageReference>
+    <PackageReference Include="ReflectionMagic">
+      <Version>5.0.1</Version>
+    </PackageReference>
     <PackageReference Include="System.Text.Json">
       <Version>10.0.2</Version>
+    </PackageReference>
+    <PackageReference Include="System.Memory">
+      <Version>4.6.3</Version>
+    </PackageReference>
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe">
+      <Version>6.1.2</Version>
     </PackageReference>
   </ItemGroup>
   <ItemGroup>

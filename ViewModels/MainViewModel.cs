@@ -37,6 +37,11 @@ namespace ActiproRoslynPOC.ViewModels
         private WorkflowSignatureInfo _currentWorkflowSignature;
         private Dictionary<string, string> _workflowArguments = new Dictionary<string, string>();
 
+        // 项目管理
+        private ProjectConfig _currentProject;
+        private string _currentProjectPath;
+        public ObservableCollection<FileTreeNode> ProjectRootNodes { get; set; } = new ObservableCollection<FileTreeNode>();
+
         public MainViewModel()
         {
 
@@ -376,16 +381,14 @@ namespace ActiproRoslynPOC.ViewModels
             }
         }
 
-        private string GetProjectDirectory()
+        public string GetProjectDirectory()
         {
-            // 方法 1: 从配置文件读取
-            // return ConfigurationManager.AppSettings["ProjectDirectory"];
+            // 如果有加载的项目，使用项目路径
+            if (!string.IsNullOrEmpty(_currentProjectPath))
+                return _currentProjectPath;
 
-            // 方法 2: 固定目录（测试用）
+            // 否则使用默认目录（测试用）
             return @"E:\ai_app\actipro_rpa\TestWorkflows";
-
-            // 方法 3: 当前文件所在目录
-            // return Path.GetDirectoryName(CurrentFilePath);
         }
 
         private void ExecuteWithDependencies(string projectDirectory)
@@ -1045,6 +1048,122 @@ public class SampleWorkflow : CodedWorkflowBase
                 _debugger.SetBreakpoints(newBreakpoints);
                 AppendOutput($"[断点更新] 当前 {newBreakpoints.Count} 个断点: {string.Join(", ", newBreakpoints)}");
             }
+        }
+
+        #endregion
+
+        #region 项目管理
+
+        /// <summary>
+        /// 加载项目到文件树
+        /// </summary>
+        public void LoadProject(string projectPath)
+        {
+            try
+            {
+                if (!ProjectService.IsValidProject(projectPath))
+                {
+                    AppendOutput($"[错误] 无效的项目目录: {projectPath}");
+                    return;
+                }
+
+                _currentProjectPath = projectPath;
+                _currentProject = ProjectService.OpenProject(projectPath);
+
+                // 加载文件树
+                RefreshProjectTree();
+
+                AppendOutput($"[项目] 已加载项目: {_currentProject.Name}");
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"[错误] 加载项目失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 刷新项目文件树
+        /// </summary>
+        public void RefreshProjectTree()
+        {
+            if (string.IsNullOrEmpty(_currentProjectPath))
+                return;
+
+            // 保存展开状态
+            var expandedPaths = new HashSet<string>();
+            CollectExpandedPaths(ProjectRootNodes, expandedPaths);
+
+            // 重建树
+            ProjectRootNodes.Clear();
+            var rootNode = FileTreeNode.FromPath(_currentProjectPath);
+            rootNode.IsExpanded = true;
+            ProjectRootNodes.Add(rootNode);
+
+            // 恢复展开状态
+            RestoreExpandedPaths(ProjectRootNodes, expandedPaths);
+        }
+
+        /// <summary>
+        /// 收集所有展开节点的路径
+        /// </summary>
+        private void CollectExpandedPaths(ObservableCollection<FileTreeNode> nodes, HashSet<string> expandedPaths)
+        {
+            foreach (var node in nodes)
+            {
+                if (node.IsExpanded)
+                {
+                    expandedPaths.Add(node.FullPath);
+                }
+
+                if (node.Children.Count > 0)
+                {
+                    CollectExpandedPaths(node.Children, expandedPaths);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 恢复展开节点的状态
+        /// </summary>
+        private void RestoreExpandedPaths(ObservableCollection<FileTreeNode> nodes, HashSet<string> expandedPaths)
+        {
+            foreach (var node in nodes)
+            {
+                if (expandedPaths.Contains(node.FullPath))
+                {
+                    node.IsExpanded = true;
+                }
+
+                if (node.Children.Count > 0)
+                {
+                    RestoreExpandedPaths(node.Children, expandedPaths);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 获取选中的文件树节点
+        /// </summary>
+        public FileTreeNode GetSelectedNode()
+        {
+            return FindSelectedNode(ProjectRootNodes);
+        }
+
+        private FileTreeNode FindSelectedNode(ObservableCollection<FileTreeNode> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                if (node.IsSelected)
+                    return node;
+
+                if (node.Children.Count > 0)
+                {
+                    var selected = FindSelectedNode(node.Children);
+                    if (selected != null)
+                        return selected;
+                }
+            }
+            return null;
         }
 
         #endregion

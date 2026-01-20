@@ -91,7 +91,20 @@ namespace ActiproRoslynPOC.Services
             var compileResult = _compiler.CompileMultiple(codeFiles);
             if (!compileResult.Success)
             {
-                throw new InvalidOperationException($"编译失败: {compileResult.ErrorSummary}");
+                // 构建详细的错误信息
+                var errorDetails = new System.Text.StringBuilder();
+                errorDetails.AppendLine($"编译失败: {compileResult.ErrorSummary}");
+
+                if (compileResult.Diagnostics != null && compileResult.Diagnostics.Any(d => d.IsError))
+                {
+                    errorDetails.AppendLine("详细错误:");
+                    foreach (var diagnostic in compileResult.Diagnostics.Where(d => d.IsError))
+                    {
+                        errorDetails.AppendLine($"  [{diagnostic.FileName}:{diagnostic.Line},{diagnostic.Column}] {diagnostic.Message}");
+                    }
+                }
+
+                throw new InvalidOperationException(errorDetails.ToString());
             }
 
             // 查找目标工作流类型

@@ -3,6 +3,7 @@ using ActiproRoslynPOC.Themes;
 using ActiproRoslynPOC.Debugging;
 using ActiproRoslynPOC.Settings;
 using ActiproRoslynPOC.Views;
+using ActiproRoslynPOC.Services;
 using ActiproSoftware.Text;
 using ActiproSoftware.Text.Languages.CSharp.Implementation;
 using ActiproSoftware.Text.Languages.DotNet;
@@ -42,8 +43,9 @@ namespace ActiproRoslynPOC
         private HighlightSelectionMatchesTaggerProvider _selectionMatchesTaggerProvider;
         private HighlightReferencesTaggerProvider _referencesTaggerProvider;
 
-        // 新增: Roslyn 语义分类 Tagger Provider
+        // 新增: Roslyn 语义分类 Tagger Provider（两种实现方式）
         private RoslynSemanticClassificationTaggerProvider _roslynSemanticTaggerProvider;
+        private RoslynTokenTaggerProvider _roslynTokenTaggerProvider;  // 新方案：继承 TokenTagger
 
         // 多文档管理：存储打开的文档 <文件路径, DocumentWindow>
         private Dictionary<string, DocumentWindow> _openDocuments = new Dictionary<string, DocumentWindow>(StringComparer.OrdinalIgnoreCase);
@@ -66,6 +68,7 @@ namespace ActiproRoslynPOC
             _selectionMatchesTaggerProvider = new HighlightSelectionMatchesTaggerProvider();
             _referencesTaggerProvider = new HighlightReferencesTaggerProvider();
             _roslynSemanticTaggerProvider = new RoslynSemanticClassificationTaggerProvider();
+            _roslynTokenTaggerProvider = new RoslynTokenTaggerProvider();  // 新方案
 
             // --- 2.1 初始化 Roslyn 样式配置（使用 VS Settings 导入方式）---
             RoslynStyleConfigurator.Initialize();
@@ -180,11 +183,22 @@ namespace ActiproRoslynPOC
                 System.Diagnostics.Debug.WriteLine("[MainWindow] 引用高亮 Tagger 已注册");
             }
 
-            // 注册 Roslyn 语义分类 Tagger Provider（基于 SemanticModel 的精确高亮）
-            if (_roslynSemanticTaggerProvider != null)
+            // 【方案一】注册 Roslyn 语义分类 Tagger Provider（基于 SemanticModel，添加额外 Tagger 层）
+            // 使用 OrderPlacement.Before 确保在 Token tagger 之前
+            // 注意：这个方案生成的 tags 正确但颜色不显示
+            //if (_roslynSemanticTaggerProvider != null)
+            //{
+            //    _csharpLanguage.RegisterService(_roslynSemanticTaggerProvider);
+            //    System.Diagnostics.Debug.WriteLine("[MainWindow] Roslyn 语义分类 Tagger 已注册（基于 SemanticModel，OrderPlacement.Before）");
+            //}
+
+            // 【方案二】注册 Roslyn Token Tagger Provider（继承 TokenTagger，在 token 级别分类）
+            // 这是 UiPath 使用的方式，直接在词法分析层面修改分类
+            // 已修复：使用行/列位置匹配（参考 UiPath GetKey 算法）
+            if (_roslynTokenTaggerProvider != null)
             {
-                _csharpLanguage.RegisterService(_roslynSemanticTaggerProvider);
-                System.Diagnostics.Debug.WriteLine("[MainWindow] Roslyn 语义分类 Tagger 已注册（基于 SemanticModel）");
+                _csharpLanguage.RegisterService(_roslynTokenTaggerProvider);
+                System.Diagnostics.Debug.WriteLine("[MainWindow] Roslyn Token Tagger 已注册（继承 TokenTagger，使用行/列位置匹配）");
             }
 
             // --- 注册调试功能服务 ---
@@ -336,10 +350,19 @@ namespace ActiproRoslynPOC
             // 检查文档是否已打开
             if (_openDocuments.TryGetValue(filePath, out DocumentWindow existingDoc))
             {
-                // 已打开，激活它
-                existingDoc.Activate();
-                AppendOutput($"[文档] 切换到: {Path.GetFileName(filePath)}");
-                return;
+                // 检查文档是否仍在 DockSite 中（可能被用户关闭了）
+                if (existingDoc.IsOpen)
+                {
+                    // 已打开，激活它
+                    existingDoc.Activate();
+                    AppendOutput($"[文档] 切换到: {Path.GetFileName(filePath)}");
+                    return;
+                }
+                else
+                {
+                    // 文档已关闭，从字典中移除
+                    _openDocuments.Remove(filePath);
+                }
             }
 
             // 创建新的 SyntaxEditor
@@ -486,6 +509,16 @@ namespace ActiproRoslynPOC
             if (!_openDocuments.TryGetValue(filePath, out DocumentWindow docWindow))
                 return;
 
+            // 检查是否是工作流设计器
+            if (docWindow.Tag is WorkflowDocumentInfo workflowInfo)
+            {
+                SaveWorkflowDesigner(workflowInfo);
+                // 更新标题（移除 * 标记）
+                docWindow.Title = Path.GetFileName(filePath);
+                return;
+            }
+
+            // 处理普通文本编辑器
             var editor = docWindow.Content as SyntaxEditor;
             if (editor == null) return;
 
@@ -554,33 +587,20 @@ namespace ActiproRoslynPOC
 
         #region 文件列表
 
+        // 旧的 ListBox 方法已被 TreeView 项目资源管理器替代
         private void RefreshFileList()
         {
-            var projectDirectory = @"E:\ai_app\actipro_rpa\TestWorkflows";
-            if (Directory.Exists(projectDirectory))
-            {
-                var csFiles = Directory.GetFiles(projectDirectory, "*.cs")
-                    .Select(f => Path.GetFileName(f))
-                    .OrderBy(f => f).ToList();
-                fileListBox.ItemsSource = csFiles;
-            }
+            // 已废弃：使用 _viewModel.RefreshProjectTree() 代替
         }
 
         private void InitializeFileList()
         {
-            RefreshFileList();
-
-            // 双击打开文件已在 XAML 中绑定
+            // 已废弃：文件树在打开项目时自动加载
         }
 
         private void OnFileListBoxMouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            if (fileListBox.SelectedItem is string fileName)
-            {
-                var projectDirectory = @"E:\ai_app\actipro_rpa\TestWorkflows";
-                var fullPath = Path.Combine(projectDirectory, fileName);
-                OpenDocument(fullPath);
-            }
+            // 已废弃：使用 OnTreeViewMouseDoubleClick 代替
         }
 
         #endregion
@@ -713,6 +733,111 @@ namespace ActiproRoslynPOC
 
                 AppendOutput("[设置] 编辑器设置已更新");
             }
+        }
+
+        /// <summary>
+        /// 运行 XAML 工作流按钮点击事件
+        /// </summary>
+        private void OnRunXamlWorkflowClick(object sender, RoutedEventArgs e)
+        {
+            RunCurrentWorkflow();
+        }
+
+        /// <summary>
+        /// 调用工作流按钮点击事件
+        /// </summary>
+        private void OnInvokeWorkflowClick(object sender, RoutedEventArgs e)
+        {
+            var projectDirectory = @"E:\ai_app\actipro_rpa\TestWorkflows";
+
+            var dialog = new InvokeWorkflowDialog(projectDirectory)
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                // 用户确认调用工作流
+                var workflowPath = dialog.SelectedWorkflowPath;
+                var arguments = dialog.Arguments;
+                var outputVar = dialog.OutputVariableName;
+                var entryInfo = dialog.SelectedEntryInfo;
+
+                AppendOutput($"[调用工作流] 文件: {Path.GetFileName(workflowPath)}");
+                AppendOutput($"[调用工作流] 入口方法: {entryInfo?.ClassName}.{entryInfo?.MethodName}");
+
+                if (arguments != null && arguments.Count > 0)
+                {
+                    AppendOutput("[调用工作流] 参数:");
+                    foreach (var kvp in arguments)
+                    {
+                        AppendOutput($"  - {kvp.Key} = {kvp.Value}");
+                    }
+                }
+
+                // 执行工作流
+                try
+                {
+                    var invocationService = new Services.WorkflowInvocationService(projectDirectory);
+                    var result = invocationService.RunWorkflow(workflowPath, arguments);
+
+                    if (result.TryGetValue("__success", out var success) && (bool)success)
+                    {
+                        AppendOutput("[调用工作流] 执行成功!");
+
+                        if (result.TryGetValue("__result", out var returnValue) && returnValue != null)
+                        {
+                            AppendOutput($"[调用工作流] 返回值: {FormatResultValue(returnValue)}");
+
+                            if (!string.IsNullOrEmpty(outputVar))
+                            {
+                                AppendOutput($"[调用工作流] 已保存到变量: {outputVar}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var error = result.TryGetValue("__error", out var err) ? err?.ToString() : "未知错误";
+                        AppendOutput($"[调用工作流] 执行失败: {error}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendOutput($"[调用工作流] 执行异常: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 格式化返回值（支持元组展开）
+        /// </summary>
+        private string FormatResultValue(object result)
+        {
+            if (result == null)
+                return "null";
+
+            var resultType = result.GetType();
+
+            // 处理元组类型
+            if (resultType.IsGenericType && resultType.Name.StartsWith("ValueTuple"))
+            {
+                var fields = resultType.GetFields();
+                var values = new List<string>();
+                foreach (var field in fields)
+                {
+                    values.Add($"{field.Name}: {field.GetValue(result)}");
+                }
+                return $"({string.Join(", ", values)})";
+            }
+
+            // 处理字典类型
+            if (result is IDictionary<string, object> dict)
+            {
+                var items = dict.Select(kvp => $"{kvp.Key}: {kvp.Value}");
+                return $"{{ {string.Join(", ", items)} }}";
+            }
+
+            return result.ToString();
         }
 
         #endregion
@@ -968,6 +1093,560 @@ namespace ActiproRoslynPOC
 
             // 通知 ViewModel 更新调试器中的断点
             _viewModel.UpdateBreakpoints(updatedBreakpoints);
+        }
+
+        #endregion
+
+        #region 项目管理事件处理
+
+        /// <summary>
+        /// 打开项目按钮点击
+        /// </summary>
+        private void OnOpenProjectClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "选择项目文件 (project.json)",
+                Filter = "项目文件 (project.json)|project.json|所有文件 (*.*)|*.*",
+                CheckFileExists = true
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                var projectPath = Path.GetDirectoryName(dialog.FileName);
+                _viewModel.LoadProject(projectPath);
+            }
+        }
+
+        /// <summary>
+        /// 创建项目按钮点击
+        /// </summary>
+        private void OnCreateProjectClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "新建项目",
+                FileName = "project.json",
+                Filter = "项目文件 (project.json)|project.json",
+                CheckPathExists = true
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                var projectPath = Path.GetDirectoryName(dialog.FileName);
+                var projectName = new DirectoryInfo(projectPath).Name;
+
+                try
+                {
+                    var config = Services.ProjectService.CreateProject(projectPath, projectName, "新项目");
+                    _viewModel.LoadProject(projectPath);
+                    MessageBox.Show($"项目已创建: {projectName}", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"创建项目失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 刷新项目按钮点击
+        /// </summary>
+        private void OnRefreshProjectClick(object sender, RoutedEventArgs e)
+        {
+            _viewModel.RefreshProjectTree();
+        }
+
+        /// <summary>
+        /// 文件树双击事件
+        /// </summary>
+        private void OnTreeViewMouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var node = _viewModel.GetSelectedNode();
+            if (node == null) return;
+
+            // 只打开文件，不打开文件夹
+            if (node.NodeType == Models.FileTreeNodeType.CsFile)
+            {
+                OpenDocument(node.FullPath);
+            }
+            else if (node.NodeType == Models.FileTreeNodeType.XamlFile)
+            {
+                // XAML 文件用工作流设计器打开
+                OpenWorkflowDesigner(node.FullPath);
+            }
+        }
+
+        /// <summary>
+        /// 新建 CS 工作流
+        /// </summary>
+        private void OnNewCsWorkflowClick(object sender, RoutedEventArgs e)
+        {
+            var node = _viewModel.GetSelectedNode();
+            if (node == null) return;
+
+            var targetDir = node.NodeType == Models.FileTreeNodeType.Folder
+                ? node.FullPath
+                : Path.GetDirectoryName(node.FullPath);
+
+            var workflowName = PromptForInput("请输入工作流名称:", "新建 CS 工作流", "NewWorkflow");
+
+            if (string.IsNullOrWhiteSpace(workflowName))
+                return;
+
+            try
+            {
+                var projectPath = _viewModel.GetProjectDirectory();
+                Services.ProjectService.CreateCsWorkflow(projectPath, workflowName, targetDir);
+                _viewModel.RefreshProjectTree();
+                MessageBox.Show($"已创建工作流: {workflowName}.cs", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"创建失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 新建 XAML 工作流
+        /// </summary>
+        private void OnNewXamlWorkflowClick(object sender, RoutedEventArgs e)
+        {
+            var node = _viewModel.GetSelectedNode();
+            if (node == null) return;
+
+            var targetDir = node.NodeType == Models.FileTreeNodeType.Folder
+                ? node.FullPath
+                : Path.GetDirectoryName(node.FullPath);
+
+            var workflowName = PromptForInput("请输入工作流名称:", "新建 XAML 工作流", "NewWorkflow");
+
+            if (string.IsNullOrWhiteSpace(workflowName))
+                return;
+
+            try
+            {
+                var projectPath = _viewModel.GetProjectDirectory();
+                Services.ProjectService.CreateXamlWorkflow(projectPath, workflowName, targetDir);
+                _viewModel.RefreshProjectTree();
+                MessageBox.Show($"已创建工作流: {workflowName}.xaml", "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"创建失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 重命名文件
+        /// </summary>
+        private void OnRenameFileClick(object sender, RoutedEventArgs e)
+        {
+            var node = _viewModel.GetSelectedNode();
+            if (node == null || node.NodeType == Models.FileTreeNodeType.Project) return;
+
+            var newName = PromptForInput("请输入新名称:", "重命名", node.Name);
+
+            if (string.IsNullOrWhiteSpace(newName) || newName == node.Name)
+                return;
+
+            try
+            {
+                var oldPath = node.FullPath;
+                var newPath = Path.Combine(Path.GetDirectoryName(oldPath), newName);
+
+                if (File.Exists(oldPath))
+                    File.Move(oldPath, newPath);
+                else if (Directory.Exists(oldPath))
+                    Directory.Move(oldPath, newPath);
+
+                _viewModel.RefreshProjectTree();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"重命名失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 删除文件
+        /// </summary>
+        private void OnDeleteFileClick(object sender, RoutedEventArgs e)
+        {
+            var node = _viewModel.GetSelectedNode();
+            if (node == null || node.NodeType == Models.FileTreeNodeType.Project) return;
+
+            var result = MessageBox.Show(
+                $"确定要删除 {node.Name} 吗?",
+                "确认删除",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                if (File.Exists(node.FullPath))
+                    File.Delete(node.FullPath);
+                else if (Directory.Exists(node.FullPath))
+                    Directory.Delete(node.FullPath, true);
+
+                _viewModel.RefreshProjectTree();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"删除失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 在文件资源管理器中显示
+        /// </summary>
+        private void OnShowInExplorerClick(object sender, RoutedEventArgs e)
+        {
+            var node = _viewModel.GetSelectedNode();
+            if (node == null) return;
+
+            try
+            {
+                if (File.Exists(node.FullPath))
+                    System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{node.FullPath}\"");
+                else if (Directory.Exists(node.FullPath))
+                    System.Diagnostics.Process.Start("explorer.exe", node.FullPath);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"打开失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 简单的输入提示对话框
+        /// </summary>
+        private string PromptForInput(string message, string title, string defaultValue = "")
+        {
+            var dialog = new Window
+            {
+                Title = title,
+                Width = 400,
+                Height = 150,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize
+            };
+
+            var grid = new System.Windows.Controls.Grid();
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });
+
+            var stackPanel = new System.Windows.Controls.StackPanel { Margin = new Thickness(10) };
+            var label = new System.Windows.Controls.Label { Content = message };
+            var textBox = new System.Windows.Controls.TextBox { Text = defaultValue, Margin = new Thickness(0, 5, 0, 0) };
+
+            stackPanel.Children.Add(label);
+            stackPanel.Children.Add(textBox);
+            System.Windows.Controls.Grid.SetRow(stackPanel, 0);
+            grid.Children.Add(stackPanel);
+
+            var buttonPanel = new System.Windows.Controls.StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(10)
+            };
+
+            var okButton = new System.Windows.Controls.Button { Content = "确定", Width = 75, Margin = new Thickness(5, 0, 0, 0) };
+            var cancelButton = new System.Windows.Controls.Button { Content = "取消", Width = 75, Margin = new Thickness(5, 0, 0, 0) };
+
+            okButton.Click += (s, e) => { dialog.DialogResult = true; dialog.Close(); };
+            cancelButton.Click += (s, e) => { dialog.DialogResult = false; dialog.Close(); };
+
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+            System.Windows.Controls.Grid.SetRow(buttonPanel, 1);
+            grid.Children.Add(buttonPanel);
+
+            dialog.Content = grid;
+            textBox.Focus();
+            textBox.SelectAll();
+
+            return dialog.ShowDialog() == true ? textBox.Text : null;
+        }
+
+        #endregion
+
+        #region 工作流设计器
+
+        /// <summary>
+        /// 打开 XAML 工作流设计器
+        /// </summary>
+        private void OpenWorkflowDesigner(string filePath)
+        {
+            if (!File.Exists(filePath))
+            {
+                AppendOutput($"[错误] 文件不存在: {filePath}");
+                return;
+            }
+
+            // 检查文档是否已打开
+            if (_openDocuments.TryGetValue(filePath, out DocumentWindow existingDoc))
+            {
+                if (existingDoc.IsOpen)
+                {
+                    existingDoc.Activate();
+                    AppendOutput($"[工作流] 切换到: {Path.GetFileName(filePath)}");
+                    return;
+                }
+                else
+                {
+                    _openDocuments.Remove(filePath);
+                }
+            }
+
+            try
+            {
+                // 创建 WorkflowDesigner
+                var designer = new System.Activities.Presentation.WorkflowDesigner();
+
+                // 加载 XAML 文件
+                designer.Load(filePath);
+
+                // 注册自定义 Activity 的元数据
+                RegisterCustomActivities();
+
+                // 创建并添加工具箱
+                var toolboxControl = CreateToolbox();
+
+                // 创建一个 Grid 来容纳设计器和工具箱
+                var grid = new System.Windows.Controls.Grid();
+                grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(200) }); // 工具箱
+                grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // 设计器
+
+                // 添加工具箱到第一列
+                System.Windows.Controls.Grid.SetColumn(toolboxControl, 0);
+                grid.Children.Add(toolboxControl);
+
+                // 添加设计器视图到第二列
+                System.Windows.Controls.Grid.SetColumn(designer.View, 1);
+                grid.Children.Add(designer.View);
+
+                // 创建文档窗口
+                var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, grid)
+                {
+                    Description = filePath,
+                    Tag = filePath
+                };
+
+                // 监听设计器变化以标记文件为已修改
+                designer.ModelChanged += (s, e) =>
+                {
+                    // 标记文档已修改（可以在标题显示 * 号）
+                    if (!docWindow.Title.EndsWith("*"))
+                    {
+                        docWindow.Title = Path.GetFileName(filePath) + "*";
+                    }
+                };
+
+                // 保存设计器引用到文档 Tag（用于保存时获取）
+                docWindow.Tag = new WorkflowDocumentInfo
+                {
+                    FilePath = filePath,
+                    Designer = designer
+                };
+
+                // 添加到字典
+                _openDocuments[filePath] = docWindow;
+
+                // 打开文档
+                docWindow.Open();
+                docWindow.Activate();
+
+                AppendOutput($"[工作流] 已打开: {Path.GetFileName(filePath)}");
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"[错误] 打开工作流设计器失败: {ex.Message}");
+                MessageBox.Show($"无法打开工作流设计器:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 保存工作流设计器内容
+        /// </summary>
+        private void SaveWorkflowDesigner(WorkflowDocumentInfo info)
+        {
+            try
+            {
+                info.Designer.Flush();
+                info.Designer.Save(info.FilePath);
+                AppendOutput($"[工作流] 已保存: {Path.GetFileName(info.FilePath)}");
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"[错误] 保存工作流失败: {ex.Message}");
+                MessageBox.Show($"保存工作流失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 运行当前激活的 XAML 工作流
+        /// </summary>
+        private void RunCurrentWorkflow()
+        {
+            try
+            {
+                // 获取当前激活的文档窗口
+                var activeDoc = dockSite.ActiveWindow as DocumentWindow;
+                if (activeDoc == null)
+                {
+                    AppendOutput("[工作流] 没有打开的工作流");
+                    MessageBox.Show("请先打开一个工作流文件", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                // 检查是否是工作流设计器
+                if (activeDoc.Tag is WorkflowDocumentInfo workflowInfo)
+                {
+                    AppendOutput($"[工作流] 开始执行: {Path.GetFileName(workflowInfo.FilePath)}");
+
+                    // 先保存工作流
+                    SaveWorkflowDesigner(workflowInfo);
+
+                    // 使用 XamlWorkflowService 执行工作流
+                    var xamlService = new XamlWorkflowService();
+
+                    // 订阅日志事件
+                    xamlService.LogOutput += (msg) =>
+                    {
+                        AppendOutput(msg);
+                    };
+
+                    // 执行工作流
+                    var result = xamlService.ExecuteWorkflow(workflowInfo.FilePath);
+
+                    // 显示结果
+                    if (result.ContainsKey("__success") && (bool)result["__success"])
+                    {
+                        AppendOutput("[工作流] 执行成功");
+                        if (result.Count > 1) // 除了 __success 还有其他输出
+                        {
+                            AppendOutput("[工作流] 输出结果:");
+                            foreach (var kvp in result)
+                            {
+                                if (!kvp.Key.StartsWith("__"))
+                                {
+                                    AppendOutput($"  {kvp.Key} = {kvp.Value}");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var error = result.ContainsKey("__error") ? result["__error"].ToString() : "未知错误";
+                        AppendOutput($"[工作流] 执行失败: {error}");
+                        MessageBox.Show($"工作流执行失败:\n{error}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+                else
+                {
+                    // 不是工作流设计器，可能是 C# 代码编辑器
+                    AppendOutput("[工作流] 当前文档不是 XAML 工作流，请使用 '运行' 按钮执行 C# 代码");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendOutput($"[错误] 运行工作流失败: {ex.Message}");
+                MessageBox.Show($"运行工作流失败:\n{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 注册自定义 Activity 的元数据
+        /// </summary>
+        private void RegisterCustomActivities()
+        {
+            // 注册元数据存储
+            var metadataStore = new System.Activities.Presentation.Metadata.AttributeTableBuilder();
+
+            // 为 InvokeCodedWorkflow 添加自定义设计器元数据
+            metadataStore.AddCustomAttributes(
+                typeof(Activities.InvokeCodedWorkflow),
+                new System.ComponentModel.DesignerAttribute(typeof(Activities.InvokeCodedWorkflowDesigner)));
+
+            // 为 InvokeWorkflow 添加自定义设计器元数据
+            metadataStore.AddCustomAttributes(
+                typeof(Activities.InvokeWorkflow),
+                new System.ComponentModel.DesignerAttribute(typeof(Activities.InvokeWorkflowDesigner)));
+
+            System.Activities.Presentation.Metadata.MetadataStore.AddAttributeTable(metadataStore.CreateTable());
+        }
+
+        /// <summary>
+        /// 创建工具箱控件
+        /// </summary>
+        private System.Activities.Presentation.Toolbox.ToolboxControl CreateToolbox()
+        {
+            var toolbox = new System.Activities.Presentation.Toolbox.ToolboxControl();
+
+            // 1. 控制流分类
+            var controlFlowCategory = new System.Activities.Presentation.Toolbox.ToolboxCategory("控制流");
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Sequence), "Sequence"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Flowchart), "Flowchart"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.If), "If"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.While), "While"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.DoWhile), "DoWhile"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.ForEach<>), "ForEach<T>"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Switch<>), "Switch<T>"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Parallel), "Parallel"));
+            controlFlowCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Pick), "Pick"));
+            toolbox.Categories.Add(controlFlowCategory);
+
+            // 2. 基本活动分类
+            var primitivesCategory = new System.Activities.Presentation.Toolbox.ToolboxCategory("基本活动");
+            primitivesCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Assign<>), "Assign<T>"));
+            primitivesCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Delay), "Delay"));
+            primitivesCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.WriteLine), "WriteLine"));
+            primitivesCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.InvokeMethod), "InvokeMethod"));
+            toolbox.Categories.Add(primitivesCategory);
+
+            // 3. 集合操作分类
+            var collectionCategory = new System.Activities.Presentation.Toolbox.ToolboxCategory("集合操作");
+            collectionCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.AddToCollection<>), "AddToCollection<T>"));
+            collectionCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.RemoveFromCollection<>), "RemoveFromCollection<T>"));
+            collectionCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.ExistsInCollection<>), "ExistsInCollection<T>"));
+            collectionCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.ClearCollection<>), "ClearCollection<T>"));
+            toolbox.Categories.Add(collectionCategory);
+
+            // 4. 错误处理分类
+            var errorHandlingCategory = new System.Activities.Presentation.Toolbox.ToolboxCategory("错误处理");
+            errorHandlingCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.TryCatch), "TryCatch"));
+            errorHandlingCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Throw), "Throw"));
+            errorHandlingCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(typeof(System.Activities.Statements.Rethrow), "Rethrow"));
+            toolbox.Categories.Add(errorHandlingCategory);
+
+            // 5. 自定义工作流活动分类
+            var customCategory = new System.Activities.Presentation.Toolbox.ToolboxCategory("工作流调用");
+            customCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(
+                typeof(Activities.InvokeCodedWorkflow),
+                "InvokeCodedWorkflow",
+                "调用 C# 工作流"));
+            customCategory.Add(new System.Activities.Presentation.Toolbox.ToolboxItemWrapper(
+                typeof(Activities.InvokeWorkflow),
+                "InvokeWorkflow",
+                "调用 XAML 工作流"));
+            toolbox.Categories.Add(customCategory);
+
+            return toolbox;
+        }
+
+        /// <summary>
+        /// 工作流文档信息（用于存储在 DocumentWindow.Tag 中）
+        /// </summary>
+        private class WorkflowDocumentInfo
+        {
+            public string FilePath { get; set; }
+            public System.Activities.Presentation.WorkflowDesigner Designer { get; set; }
         }
 
         #endregion

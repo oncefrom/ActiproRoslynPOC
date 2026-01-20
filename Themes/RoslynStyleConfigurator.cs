@@ -115,7 +115,7 @@ namespace ActiproRoslynPOC.Themes
             registry.Register(ClassificationTypes.String, new HighlightingStyle(lightColors["String"]), true);
             registry.Register(ClassificationTypes.Comment, new HighlightingStyle(lightColors["Comment"]), true);
             registry.Register(ClassificationTypes.Number, new HighlightingStyle(lightColors["Number"]), true);
-            //registry.Register(ClassificationTypes.Identifier, new HighlightingStyle(lightColors["Identifier"]), true);
+            registry.Register(ClassificationTypes.Identifier, new HighlightingStyle(lightColors["Identifier"]), true);
             registry.Register(ClassificationTypes.Operator, new HighlightingStyle(lightColors["Operator"]), true);
             registry.Register(ClassificationTypes.PreprocessorKeyword, new HighlightingStyle(lightColors["PreprocessorKeyword"]), true);
             registry.Register(CustomClassificationTypes.UnnecessaryCode, new HighlightingStyle(lightColors["UnnecessaryCode"]), true);

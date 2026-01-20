@@ -1,6 +1,7 @@
 using ActiproSoftware.Text;
 using ActiproSoftware.Text.Tagging;
 using ActiproSoftware.Text.Tagging.Implementation;
+using ActiproSoftware.Text.Utility;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -20,6 +21,7 @@ namespace ActiproRoslynPOC.Themes
     /// 基于 Roslyn SemanticModel 的语义分类 Tagger
     /// 参考 UiPath ExtendedCSharpTokenTagger 实现
     /// 提供类名、接口名、方法名、参数、局部变量等的精确语义高亮
+    /// 【关键】使用 Ordering 确保在 Token tagger 之前执行，以覆盖默认的词法高亮
     /// </summary>
     public class RoslynSemanticClassificationTagger : TaggerBase<IClassificationTag>
     {
@@ -38,7 +40,14 @@ namespace ActiproRoslynPOC.Themes
         private readonly object _analysisLock = new object();
 
         public RoslynSemanticClassificationTagger(ICodeDocument document)
-            : base("RoslynSemanticClassificationTagger", null, document, true)
+            : base(
+                "RoslynSemanticClassificationTagger",
+                // 【关键】设置 Ordering，让我们的 Tagger 在 Token tagger 之前排列
+                // 根据 Actipro 文档: "classification taggers are set to be ordered before the TaggerKeys.Token tagger"
+                // 这样语义分类的样式会合并到最终高亮中
+                new Ordering[] { new Ordering(TaggerKeys.Token, OrderPlacement.Before) },
+                document,
+                true)
         {
             _document = document;
             _cachedTags = new List<TagSnapshotRange<IClassificationTag>>();
@@ -52,6 +61,8 @@ namespace ActiproRoslynPOC.Themes
 
             // 确保基础编译环境已初始化
             EnsureBaseCompilation();
+
+            System.Diagnostics.Debug.WriteLine("[RoslynSemanticTagger] Tagger 已创建，设置为在 Token tagger 之前排列（OrderPlacement.Before）");
         }
 
         /// <summary>

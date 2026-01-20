@@ -72,6 +72,7 @@ namespace ActiproRoslynPOC.Services
 
                 workflowApp.Completed = (e) =>
                 {
+                    completedEvent.Set();
                     if (e.CompletionState == ActivityInstanceState.Closed)
                     {
                         outputs = e.Outputs;
@@ -86,14 +87,13 @@ namespace ActiproRoslynPOC.Services
                         workflowException = e.TerminationException;
                         LogOutput?.Invoke($"[XAML] 工作流出错: {e.TerminationException?.Message}");
                     }
-                    completedEvent.Set();
                 };
 
                 workflowApp.Aborted = (e) =>
                 {
+                    completedEvent.Set();
                     workflowException = e.Reason;
                     LogOutput?.Invoke($"[XAML] 工作流中止: {e.Reason?.Message}");
-                    completedEvent.Set();
                 };
 
                 workflowApp.OnUnhandledException = (e) =>
@@ -107,8 +107,15 @@ namespace ActiproRoslynPOC.Services
                 LogOutput?.Invoke("[XAML] 开始执行...");
                 workflowApp.Run();
 
-                // 等待完成
-                completedEvent.WaitOne();
+                // 等待完成 (添加超时防止永久阻塞)
+                bool completed = completedEvent.WaitOne(TimeSpan.FromSeconds(30));
+
+                if (!completed)
+                {
+                    LogOutput?.Invoke("[XAML] 工作流执行超时 (30秒)");
+                    workflowApp.Abort("执行超时");
+                    throw new TimeoutException("工作流执行超时");
+                }
 
                 if (workflowException != null)
                 {

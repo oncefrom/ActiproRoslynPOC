@@ -1,0 +1,61 @@
+<Window x:Class="ActiproRoslynPOC.Views.ArgumentEditorDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="编辑工作流参数"
+        Height="400"
+        Width="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 参数列表 -->
+        <DataGrid Grid.Row="0"
+                  Name="ArgumentsDataGrid"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="True"
+                  CanUserDeleteRows="True"
+                  Margin="10">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="参数名" Binding="{Binding Name}" Width="*"/>
+                <DataGridComboBoxColumn Header="方向"
+                                        SelectedItemBinding="{Binding Direction}"
+                                        Width="100">
+                    <DataGridComboBoxColumn.ElementStyle>
+                        <Style TargetType="ComboBox">
+                            <Setter Property="ItemsSource" Value="{Binding DirectionOptions}"/>
+                        </Style>
+                    </DataGridComboBoxColumn.ElementStyle>
+                    <DataGridComboBoxColumn.EditingElementStyle>
+                        <Style TargetType="ComboBox">
+                            <Setter Property="ItemsSource" Value="{Binding DirectionOptions}"/>
+                        </Style>
+                    </DataGridComboBoxColumn.EditingElementStyle>
+                </DataGridComboBoxColumn>
+                <DataGridTextColumn Header="类型" Binding="{Binding ArgumentType}" Width="150"/>
+                <DataGridTextColumn Header="默认值" Binding="{Binding DefaultValue}" Width="150"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- 按钮栏 -->
+        <StackPanel Grid.Row="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="10">
+            <Button Content="确定"
+                    Width="80"
+                    Height="30"
+                    Margin="0,0,10,0"
+                    Click="OnOkClick"
+                    IsDefault="True"/>
+            <Button Content="取消"
+                    Width="80"
+                    Height="30"
+                    Click="OnCancelClick"
+                    IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

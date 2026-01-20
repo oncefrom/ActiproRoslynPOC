@@ -25,10 +25,22 @@
                     </StackPanel>
                 </Button>
                 <Separator/>
-                <Button Command="{Binding RunCommand}">
+                <Button Command="{Binding RunCommand}" ToolTip="运行 C# 代码 (F5)">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="▶" Foreground="#4EC9B0" Margin="0,0,5,0"/>
+                        <TextBlock Text="运行代码"/>
+                    </StackPanel>
+                </Button>
+                <Button Click="OnRunXamlWorkflowClick" ToolTip="运行当前 XAML 工作流 (F6)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="▶" Foreground="#9CDCFE" Margin="0,0,5,0"/>
                         <TextBlock Text="运行工作流"/>
+                    </StackPanel>
+                </Button>
+                <Button Click="OnInvokeWorkflowClick" ToolTip="调用其他工作流">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📞" Margin="0,0,5,0"/>
+                        <TextBlock Text="调用工作流"/>
                     </StackPanel>
                 </Button>
                 <Separator/>
@@ -125,19 +137,63 @@
             </docking:SplitContainer>
             <docking:DockSite.AutoHideLeftContainers>
                 <docking:ToolWindowContainer>
-                    <docking:ToolWindow Title="项目文件" IsOpen="True">
-                        <ListBox x:Name="fileListBox"
-         BorderThickness="0"
-         MouseDoubleClick="OnFileListBoxMouseDoubleClick">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="📄" Margin="0,0,5,0"/>
-                                        <TextBlock Text="{Binding}"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
+                    <docking:ToolWindow Title="项目资源管理器" IsOpen="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- 项目操作工具栏 -->
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="5">
+                                <Button Click="OnOpenProjectClick" ToolTip="打开项目" Margin="2">
+                                    <TextBlock Text="��"/>
+                                </Button>
+                                <Button Click="OnCreateProjectClick" ToolTip="新建项目" Margin="2">
+                                    <TextBlock Text="➕"/>
+                                </Button>
+                                <Button Click="OnRefreshProjectClick" ToolTip="刷新" Margin="2">
+                                    <TextBlock Text="🔄"/>
+                                </Button>
+                            </StackPanel>
+
+                            <!-- 文件树视图 -->
+                            <TreeView x:Name="projectTreeView"
+                                      Grid.Row="1"
+                                      BorderThickness="0"
+                                      ItemsSource="{Binding ProjectRootNodes}"
+                                      MouseDoubleClick="OnTreeViewMouseDoubleClick">
+                                <TreeView.Resources>
+                                    <!-- 右键菜单 -->
+                                    <ContextMenu x:Key="FileTreeContextMenu">
+                                        <MenuItem Header="新建 CS 工作流" Click="OnNewCsWorkflowClick"/>
+                                        <MenuItem Header="新建 XAML 工作流" Click="OnNewXamlWorkflowClick"/>
+                                        <Separator/>
+                                        <MenuItem Header="重命名" Click="OnRenameFileClick"/>
+                                        <MenuItem Header="删除" Click="OnDeleteFileClick"/>
+                                        <Separator/>
+                                        <MenuItem Header="在文件资源管理器中显示" Click="OnShowInExplorerClick"/>
+                                    </ContextMenu>
+                                </TreeView.Resources>
+
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                        <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                                        <Setter Property="ContextMenu" Value="{StaticResource FileTreeContextMenu}"/>
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Icon}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="{Binding Name}"/>
+                                        </StackPanel>
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                        </Grid>
                     </docking:ToolWindow>
                 </docking:ToolWindowContainer>
             </docking:DockSite.AutoHideLeftContainers>

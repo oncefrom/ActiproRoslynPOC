@@ -245,7 +245,8 @@ namespace ActiproRoslynPOC.Services
                     Message = diag.GetMessage(),
                     Severity = diag.Severity,
                     Line = lineSpan.StartLinePosition.Line + 1,
-                    Column = lineSpan.StartLinePosition.Character + 1
+                    Column = lineSpan.StartLinePosition.Character + 1,
+                    FileName = System.IO.Path.GetFileName(lineSpan.Path)
                 });
             }
             return result;
