@@ -372,6 +372,9 @@ namespace ActiproRoslynPOC
                 IsCurrentLineHighlightingEnabled = true,
                 IsSelectionMarginVisible = true,
                 IsIndicatorMarginVisible = true,  // 启用断点指示器边栏
+                AreIndentationGuidesVisible = true,
+                AreWordWrapGlyphsVisible = true,
+
                 BorderThickness = new Thickness(0)
             };
 
@@ -407,8 +410,26 @@ namespace ActiproRoslynPOC
                 HandleReferenceHighlight(editor, e);
             };
 
-            // 创建文档窗口
-            var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, editor)
+            // 创建包含导航栏和编辑器的容器
+            var containerGrid = new System.Windows.Controls.Grid();
+            containerGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = System.Windows.GridLength.Auto });
+            containerGrid.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = new System.Windows.GridLength(1, System.Windows.GridUnitType.Star) });
+
+            // 创建导航符号选择器
+            var symbolSelector = new NavigableSymbolSelector
+            {
+                Margin = new Thickness(0, 0, 0, 1)
+            };
+            symbolSelector.SyntaxEditor = editor;
+
+            System.Windows.Controls.Grid.SetRow(symbolSelector, 0);
+            System.Windows.Controls.Grid.SetRow(editor, 1);
+
+            containerGrid.Children.Add(symbolSelector);
+            containerGrid.Children.Add(editor);
+
+            // 创建文档窗口（内容为容器 Grid）
+            var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, containerGrid)
             {
                 Description = filePath,
                 Tag = filePath  // 存储完整路径
@@ -438,16 +459,32 @@ namespace ActiproRoslynPOC
             {
                 _viewModel.Code = editor.Document.CurrentSnapshot.Text;
             }
+        }
 
-            // 标记文档为已修改
-            if (_openDocuments.TryGetValue(filePath, out DocumentWindow docWindow))
+        /// <summary>
+        /// 从文档窗口内容中获取 SyntaxEditor
+        /// </summary>
+        private SyntaxEditor GetEditorFromDocumentWindow(DocumentWindow docWindow)
+        {
+            if (docWindow?.Content == null)
+                return null;
+
+            // 如果内容直接是 SyntaxEditor
+            if (docWindow.Content is SyntaxEditor editor)
+                return editor;
+
+            // 如果内容是 Grid 容器（包含导航栏和编辑器）
+            if (docWindow.Content is System.Windows.Controls.Grid grid)
             {
-                string fileName = Path.GetFileName(filePath);
-                if (!docWindow.Title.StartsWith("*"))
+                // 编辑器在 Grid 的第二行 (Row 1)
+                foreach (var child in grid.Children)
                 {
-                    docWindow.Title = "*" + fileName;
+                    if (child is SyntaxEditor se && System.Windows.Controls.Grid.GetRow(se) == 1)
+                        return se;
                 }
             }
+
+            return null;
         }
 
         /// <summary>
@@ -456,7 +493,7 @@ namespace ActiproRoslynPOC
         private SyntaxEditor GetActiveEditor()
         {
             var activeDoc = dockSite.ActiveWindow as DocumentWindow;
-            return activeDoc?.Content as SyntaxEditor;
+            return GetEditorFromDocumentWindow(activeDoc);
         }
 
         /// <summary>
@@ -481,7 +518,7 @@ namespace ActiproRoslynPOC
             if (e.Window is DocumentWindow docWindow)
             {
                 string filePath = docWindow.Tag as string;
-                var editor = docWindow.Content as SyntaxEditor;
+                var editor = GetEditorFromDocumentWindow(docWindow);
 
                 if (!string.IsNullOrEmpty(filePath) && editor != null)
                 {
@@ -513,13 +550,11 @@ namespace ActiproRoslynPOC
             if (docWindow.Tag is WorkflowDocumentInfo workflowInfo)
             {
                 SaveWorkflowDesigner(workflowInfo);
-                // 更新标题（移除 * 标记）
-                docWindow.Title = Path.GetFileName(filePath);
                 return;
             }
 
             // 处理普通文本编辑器
-            var editor = docWindow.Content as SyntaxEditor;
+            var editor = GetEditorFromDocumentWindow(docWindow);
             if (editor == null) return;
 
             try
@@ -527,8 +562,8 @@ namespace ActiproRoslynPOC
                 string content = editor.Document.CurrentSnapshot.Text;
                 File.WriteAllText(filePath, content);
 
-                // 更新标题（移除 * 标记）
-                docWindow.Title = Path.GetFileName(filePath);
+                // 关键：标记文档为未修改状态（清除行号旁的修改标记）
+                editor.Document.IsModified = false;
 
                 // 同步到 SourceFile
                 _projectAssembly.SourceFiles.QueueCode(_csharpLanguage, filePath, content);
@@ -1406,33 +1441,32 @@ namespace ActiproRoslynPOC
 
             try
             {
+                // 注册自定义 Activity 的元数据（必须在创建设计器之前调用）
+                RegisterCustomActivities();
+
                 // 创建 WorkflowDesigner
                 var designer = new System.Activities.Presentation.WorkflowDesigner();
 
-                // 加载 XAML 文件
-                designer.Load(filePath);
+                // 检查文件是否为空或新创建的
+                bool isNewFile = !File.Exists(filePath) || new FileInfo(filePath).Length == 0;
 
-                // 注册自定义 Activity 的元数据
-                RegisterCustomActivities();
+                if (isNewFile)
+                {
+                    // 创建一个新的 Sequence 作为根活动
+                    var rootActivity = WorkflowDesignerHelper.CreateNewSequenceWorkflow();
+                    designer.Load(rootActivity);
+                }
+                else
+                {
+                    // 加载 XAML 文件
+                    designer.Load(filePath);
+                }
 
-                // 创建并添加工具箱
-                var toolboxControl = CreateToolbox();
-
-                // 创建一个 Grid 来容纳设计器和工具箱
-                var grid = new System.Windows.Controls.Grid();
-                grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(200) }); // 工具箱
-                grid.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // 设计器
-
-                // 添加工具箱到第一列
-                System.Windows.Controls.Grid.SetColumn(toolboxControl, 0);
-                grid.Children.Add(toolboxControl);
-
-                // 添加设计器视图到第二列
-                System.Windows.Controls.Grid.SetColumn(designer.View, 1);
-                grid.Children.Add(designer.View);
+                // 使用增强的布局（包含工具箱、设计器、属性面板、变量面板）
+                var layout = WorkflowDesignerHelper.CreateEnhancedDesignerLayout(designer);
 
                 // 创建文档窗口
-                var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, grid)
+                var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, layout)
                 {
                     Description = filePath,
                     Tag = filePath
@@ -1562,11 +1596,19 @@ namespace ActiproRoslynPOC
         }
 
         /// <summary>
-        /// 注册自定义 Activity 的元数据
+        /// 注册自定义 Activity 的元数据（只注册一次）
         /// </summary>
+        private static bool _designerMetadataRegistered = false;
         private void RegisterCustomActivities()
         {
-            // 注册元数据存储
+            if (_designerMetadataRegistered)
+                return;
+
+            // 注册标准活动的设计器元数据（这是支持多组件的关键！）
+            var dm = new System.Activities.Core.Presentation.DesignerMetadata();
+            dm.Register();
+
+            // 注册自定义元数据存储
             var metadataStore = new System.Activities.Presentation.Metadata.AttributeTableBuilder();
 
             // 为 InvokeCodedWorkflow 添加自定义设计器元数据
@@ -1580,6 +1622,8 @@ namespace ActiproRoslynPOC
                 new System.ComponentModel.DesignerAttribute(typeof(Activities.InvokeWorkflowDesigner)));
 
             System.Activities.Presentation.Metadata.MetadataStore.AddAttributeTable(metadataStore.CreateTable());
+
+            _designerMetadataRegistered = true;
         }
 
         /// <summary>

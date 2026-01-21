@@ -52,7 +52,7 @@ namespace ActiproRoslynPOC.Views
             var result = new Dictionary<string, Argument>();
             foreach (var item in Arguments.Where(a => !string.IsNullOrWhiteSpace(a.Name)))
             {
-                ArgumentDirection direction = ArgumentDirection.In;
+                System.Activities.ArgumentDirection direction = System.Activities.ArgumentDirection.In;
                 Enum.TryParse(item.Direction, out direction);
 
                 // 根据类型创建参数

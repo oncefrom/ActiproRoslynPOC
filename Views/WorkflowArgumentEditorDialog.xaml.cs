@@ -30,14 +30,29 @@ namespace ActiproRoslynPOC.Views
         }
 
         /// <summary>
-        /// 设置工作流文件路径并分析参数
+        /// 设置工作流文件路径（不自动分析，保留已有参数）
         /// </summary>
         public void SetWorkflowPath(string workflowFilePath)
         {
             _workflowFilePath = workflowFilePath;
             WorkflowPathTextBox.Text = workflowFilePath;
 
-            // 如果路径有效，自动分析参数
+            // 只有在没有参数时才自动分析
+            // 如果已经有参数（从 VB 表达式加载的），保留它们
+            if (Arguments.Count == 0 && !string.IsNullOrWhiteSpace(workflowFilePath))
+            {
+                AnalyzeWorkflowArguments();
+            }
+        }
+
+        /// <summary>
+        /// 设置工作流文件路径并强制分析参数（清空已有参数）
+        /// </summary>
+        public void SetWorkflowPathAndAnalyze(string workflowFilePath)
+        {
+            _workflowFilePath = workflowFilePath;
+            WorkflowPathTextBox.Text = workflowFilePath;
+
             if (!string.IsNullOrWhiteSpace(workflowFilePath))
             {
                 AnalyzeWorkflowArguments();
@@ -68,41 +83,25 @@ namespace ActiproRoslynPOC.Views
             if (string.IsNullOrWhiteSpace(vbExpression) || vbExpression == "Nothing")
                 return;
 
-            // 调试：确认方法被调用
-            //MessageBox.Show($"LoadFromVBExpression 被调用!\n\n表达式: {vbExpression}\n\nArguments 数量: {Arguments.Count}",
-            //    "调试 - 方法入口", MessageBoxButton.OK, MessageBoxImage.Information);
-
             try
             {
                 // 简单解析 VB 表达式
                 // 格式: New Dictionary(Of String, Object) From {{"key1", value1}, {"key2", value2}}
 
-                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 原始表达式: {vbExpression}");
-                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] Arguments.Count: {Arguments.Count}");
-
                 var startIndex = vbExpression.IndexOf("From {");
                 if (startIndex < 0)
-                {
-                    System.Diagnostics.Debug.WriteLine("[LoadFromVBExpression] 找不到 'From {' ");
                     return;
-                }
 
                 var content = vbExpression.Substring(startIndex + 6); // 跳过 "From {"
                 var endIndex = content.LastIndexOf("}");
                 if (endIndex < 0)
-                {
-                    System.Diagnostics.Debug.WriteLine("[LoadFromVBExpression] 找不到结束 '}' ");
                     return;
-                }
 
                 content = content.Substring(0, endIndex).Trim();
-                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 提取内容: {content}");
 
                 // 分割键值对
                 var pairs = SplitDictionaryPairs(content);
-                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 分割后的键值对数量: {pairs.Count}");
 
-                int matchedCount = 0;
                 foreach (var pair in pairs)
                 {
                     var parts = SplitKeyValue(pair);
@@ -111,57 +110,40 @@ namespace ActiproRoslynPOC.Views
                         var key = parts[0].Trim().Trim('"');
                         var value = parts[1].Trim();
 
-                        System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 处理键值对: key='{key}', value='{value}'");
-
-                        // 查找对应的参数项
+                        // 查找对应的参数项，如果不存在则创建
                         var argItem = Arguments.FirstOrDefault(a => a.Name == key);
-                        if (argItem != null)
+                        if (argItem == null)
                         {
-                            // 还原值
-                            if (value.StartsWith("\"") && value.EndsWith("\"") && value.Length > 1)
+                            // 创建新的参数项
+                            argItem = new WorkflowArgumentItem
                             {
-                                // 字符串字面量：保留引号,这样用户看到的就是他们输入的
-                                // 例如用户输入 "123"，保存为 "123"，还原后显示 "123"
-                                var innerValue = value.Substring(1, value.Length - 2).Replace("\"\"", "\"");
-                                argItem.Value = "\"" + innerValue + "\"";
-                                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 设置字符串值: '{argItem.Value}'");
-                            }
-                            else
-                            {
-                                // 变量引用或数字,直接还原
-                                argItem.Value = value;
-                                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 设置变量/数字值: '{argItem.Value}'");
-                            }
-                            matchedCount++;
+                                Name = key,
+                                TypeName = "Object",
+                                Type = typeof(object),
+                                Direction = WorkflowWorkflowArgumentDirection.In,
+                                IsReadOnly = false
+                            };
+                            Arguments.Add(argItem);
+                        }
+
+                        // 还原值
+                        if (value.StartsWith("\"") && value.EndsWith("\"") && value.Length > 1)
+                        {
+                            // 字符串字面量：保留引号,这样用户看到的就是他们输入的
+                            var innerValue = value.Substring(1, value.Length - 2).Replace("\"\"", "\"");
+                            argItem.Value = "\"" + innerValue + "\"";
                         }
                         else
                         {
-                            System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 未找到匹配的参数项: '{key}'");
+                            // 变量引用或数字,直接还原
+                            argItem.Value = value;
                         }
                     }
                 }
-
-                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 成功匹配并还原 {matchedCount} 个参数值");
-
-                // 如果没有匹配任何参数，显示调试信息
-                if (matchedCount == 0 && pairs.Count > 0)
-                {
-                    var availableNames = string.Join(", ", Arguments.Select(a => $"'{a.Name}'"));
-                    MessageBox.Show($"VB 表达式解析失败 - 没有匹配到任何参数:\n\n" +
-                        $"表达式: {vbExpression}\n\n" +
-                        $"提取内容: {content}\n\n" +
-                        $"键值对数量: {pairs.Count}\n" +
-                        $"Arguments 数量: {Arguments.Count}\n" +
-                        $"可用参数名: {availableNames}\n\n" +
-                        $"解析的键值对:\n{string.Join("\n", pairs.Select((p, i) => $"  [{i}] {p}"))}",
-                        "调试信息", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
             }
-            catch (Exception ex)
+            catch
             {
-                // 显示错误信息以便调试
-                MessageBox.Show($"解析 VB 表达式时发生错误:\n\n{ex.Message}\n\n{ex.StackTrace}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                System.Diagnostics.Debug.WriteLine($"[LoadFromVBExpression] 异常: {ex.Message}");
+                // 解析失败，忽略
             }
         }
 
@@ -457,21 +439,80 @@ namespace ActiproRoslynPOC.Views
 
             if (executeMethod != null)
             {
+                // 解析输入参数
                 var parameters = executeMethod.GetParameters();
                 foreach (var param in parameters)
                 {
+                    // 检查是否是 out 或 ref 参数
+                    var direction = WorkflowWorkflowArgumentDirection.In;
+                    if (param.IsOut)
+                    {
+                        direction = WorkflowWorkflowArgumentDirection.Out;
+                    }
+                    else if (param.ParameterType.IsByRef)
+                    {
+                        direction = WorkflowWorkflowArgumentDirection.InOut;
+                    }
+
                     Arguments.Add(new WorkflowArgumentItem
                     {
                         Name = param.Name,
                         Type = param.ParameterType,
                         TypeName = GetFriendlyTypeName(param.ParameterType),
-                        Value = ""
+                        Direction = direction,
+                        Value = "",
+                        IsReadOnly = true
                     });
+                }
+
+                // 解析返回值（支持元组作为输出参数）
+                var returnType = executeMethod.ReturnType;
+                if (returnType != typeof(void))
+                {
+                    // 检查是否是 ValueTuple（命名元组）
+                    if (returnType.IsGenericType && returnType.FullName?.StartsWith("System.ValueTuple") == true)
+                    {
+                        // 获取元组元素的名称（通过 TupleElementNames 属性）
+                        var tupleNames = executeMethod.ReturnTypeCustomAttributes
+                            .GetCustomAttributes(typeof(System.Runtime.CompilerServices.TupleElementNamesAttribute), false)
+                            .Cast<System.Runtime.CompilerServices.TupleElementNamesAttribute>()
+                            .FirstOrDefault()?.TransformNames;
+
+                        var tupleTypes = returnType.GetGenericArguments();
+
+                        for (int i = 0; i < tupleTypes.Length; i++)
+                        {
+                            var elementName = tupleNames != null && i < tupleNames.Count ? tupleNames[i] : $"Item{i + 1}";
+                            var elementType = tupleTypes[i];
+
+                            Arguments.Add(new WorkflowArgumentItem
+                            {
+                                Name = elementName ?? $"Item{i + 1}",
+                                Type = elementType,
+                                TypeName = GetFriendlyTypeName(elementType),
+                                Direction = WorkflowWorkflowArgumentDirection.Out,
+                                Value = "",
+                                IsReadOnly = true
+                            });
+                        }
+                    }
+                    else
+                    {
+                        // 非元组返回值，作为单个输出参数
+                        Arguments.Add(new WorkflowArgumentItem
+                        {
+                            Name = "Result",
+                            Type = returnType,
+                            TypeName = GetFriendlyTypeName(returnType),
+                            Direction = WorkflowWorkflowArgumentDirection.Out,
+                            Value = "",
+                            IsReadOnly = true
+                        });
+                    }
                 }
             }
 
             // 如果没有找到参数，尝试通过 Arguments 属性访问
-            // CodedWorkflowBase 有一个 Arguments 字典属性
             if (Arguments.Count == 0)
             {
                 MessageBox.Show("此工作流没有定义显式参数。\n\n提示：可以通过 Arguments 字典访问参数。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -490,12 +531,21 @@ namespace ActiproRoslynPOC.Views
 
             foreach (var arg in argsInfo.Arguments)
             {
+                // 转换 Services.ArgumentDirection 到 Views.WorkflowWorkflowArgumentDirection
+                var direction = WorkflowWorkflowArgumentDirection.In;
+                if (arg.Direction == Services.ArgumentDirection.Out)
+                    direction = WorkflowWorkflowArgumentDirection.Out;
+                else if (arg.Direction == Services.ArgumentDirection.InOut)
+                    direction = WorkflowWorkflowArgumentDirection.InOut;
+
                 Arguments.Add(new WorkflowArgumentItem
                 {
                     Name = arg.Name,
                     Type = arg.Type,
                     TypeName = GetFriendlyTypeName(arg.Type),
-                    Value = ""
+                    Direction = direction,
+                    Value = "",
+                    IsReadOnly = true
                 });
             }
         }
@@ -567,7 +617,13 @@ namespace ActiproRoslynPOC.Views
 
         private void OnAnalyzeClick(object sender, RoutedEventArgs e)
         {
-            AnalyzeWorkflowArguments();
+            // 从文本框更新路径并强制重新分析（会清空已有参数）
+            SetWorkflowPathAndAnalyze(WorkflowPathTextBox.Text);
+        }
+
+        private void OnWorkflowPathChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+            _workflowFilePath = WorkflowPathTextBox.Text;
         }
 
         private void OnOkClick(object sender, RoutedEventArgs e)
@@ -581,6 +637,176 @@ namespace ActiproRoslynPOC.Views
         {
             IsOk = false;
             Close();
+        }
+
+        /// <summary>
+        /// 在当前行后添加参数
+        /// </summary>
+        private void OnAddArgumentClick(object sender, RoutedEventArgs e)
+        {
+            var button = sender as System.Windows.Controls.Button;
+            var item = button?.DataContext as WorkflowArgumentItem;
+
+            int index = Arguments.IndexOf(item);
+            if (index >= 0)
+            {
+                Arguments.Insert(index + 1, new WorkflowArgumentItem
+                {
+                    Name = $"arg{Arguments.Count + 1}",
+                    TypeName = "String",
+                    Type = typeof(string),
+                    Direction = WorkflowWorkflowArgumentDirection.In,
+                    Value = "",
+                    IsReadOnly = false
+                });
+            }
+        }
+
+        /// <summary>
+        /// 删除参数
+        /// </summary>
+        private void OnDeleteArgumentClick(object sender, RoutedEventArgs e)
+        {
+            var button = sender as System.Windows.Controls.Button;
+            var item = button?.DataContext as WorkflowArgumentItem;
+
+            if (item != null && Arguments.Contains(item))
+            {
+                Arguments.Remove(item);
+            }
+        }
+
+        /// <summary>
+        /// 添加新参数
+        /// </summary>
+        private void OnAddNewArgumentClick(object sender, RoutedEventArgs e)
+        {
+            Arguments.Add(new WorkflowArgumentItem
+            {
+                Name = $"arg{Arguments.Count + 1}",
+                TypeName = "String",
+                Type = typeof(string),
+                Direction = WorkflowWorkflowArgumentDirection.In,
+                Value = "",
+                IsReadOnly = false
+            });
+        }
+
+        /// <summary>
+        /// 获取所有 In 参数的 VB 表达式（用于 Arguments 属性）
+        /// </summary>
+        public string GetInArgumentsVBExpression()
+        {
+            var inArgs = Arguments.Where(a => a.Direction == WorkflowWorkflowArgumentDirection.In || a.Direction == WorkflowWorkflowArgumentDirection.InOut).ToList();
+
+            if (inArgs.Count == 0)
+            {
+                return "Nothing";
+            }
+
+            var items = new List<string>();
+            foreach (var argItem in inArgs)
+            {
+                if (string.IsNullOrWhiteSpace(argItem.Value))
+                {
+                    continue;
+                }
+
+                string valueStr = FormatValueForVB(argItem.Value, argItem.Type);
+                items.Add("{\"" + argItem.Name + "\", " + valueStr + "}");
+            }
+
+            if (items.Count == 0)
+            {
+                return "Nothing";
+            }
+
+            return "New Dictionary(Of String, Object) From {" + string.Join(", ", items) + "}";
+        }
+
+        /// <summary>
+        /// 获取所有 Out 参数（用于绑定输出）
+        /// </summary>
+        public List<WorkflowArgumentItem> GetOutArguments()
+        {
+            return Arguments.Where(a => a.Direction == WorkflowWorkflowArgumentDirection.Out || a.Direction == WorkflowWorkflowArgumentDirection.InOut).ToList();
+        }
+
+        /// <summary>
+        /// 获取所有 Out 参数的 VB 表达式（用于 OutputBindings 属性）
+        /// 格式: New Dictionary(Of String, String) From {{"a", "variable2"}, {"b", "variable3"}}
+        /// </summary>
+        public string GetOutArgumentsVBExpression()
+        {
+            var outArgs = Arguments.Where(a =>
+                (a.Direction == WorkflowWorkflowArgumentDirection.Out || a.Direction == WorkflowWorkflowArgumentDirection.InOut)
+                && !string.IsNullOrWhiteSpace(a.Value)).ToList();
+
+            if (outArgs.Count == 0)
+            {
+                return "Nothing";
+            }
+
+            var items = new List<string>();
+            foreach (var argItem in outArgs)
+            {
+                // Out 参数的 Value 是变量名，直接作为字符串保存
+                items.Add("{\"" + argItem.Name + "\", \"" + argItem.Value + "\"}");
+            }
+
+            if (items.Count == 0)
+            {
+                return "Nothing";
+            }
+
+            return "New Dictionary(Of String, String) From {" + string.Join(", ", items) + "}";
+        }
+
+        /// <summary>
+        /// 从 Out 参数的 VB 表达式加载（用于还原已保存的绑定）
+        /// </summary>
+        public void LoadOutArgumentsFromVBExpression(string vbExpression)
+        {
+            if (string.IsNullOrWhiteSpace(vbExpression) || vbExpression == "Nothing")
+                return;
+
+            try
+            {
+                // 解析 VB 表达式: New Dictionary(Of String, String) From {{"a", "variable2"}, {"b", "variable3"}}
+                var startIndex = vbExpression.IndexOf("From {");
+                if (startIndex < 0) return;
+
+                var content = vbExpression.Substring(startIndex + 6);
+                var endIndex = content.LastIndexOf("}");
+                if (endIndex < 0) return;
+
+                content = content.Substring(0, endIndex).Trim();
+
+                // 分割键值对
+                var pairs = SplitDictionaryPairs(content);
+
+                foreach (var pair in pairs)
+                {
+                    var parts = SplitKeyValue(pair);
+                    if (parts.Length == 2)
+                    {
+                        var argName = parts[0].Trim().Trim('"');
+                        var varName = parts[1].Trim().Trim('"');
+
+                        // 查找对应的 Out 参数并设置值
+                        var argItem = Arguments.FirstOrDefault(a => a.Name == argName &&
+                            (a.Direction == WorkflowWorkflowArgumentDirection.Out || a.Direction == WorkflowWorkflowArgumentDirection.InOut));
+                        if (argItem != null)
+                        {
+                            argItem.Value = varName;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 解析失败，忽略
+            }
         }
 
         /// <summary>
@@ -688,6 +914,16 @@ namespace ActiproRoslynPOC.Views
     }
 
     /// <summary>
+    /// 工作流参数方向枚举
+    /// </summary>
+    public enum WorkflowWorkflowArgumentDirection
+    {
+        In,
+        Out,
+        InOut
+    }
+
+    /// <summary>
     /// 工作流参数项
     /// </summary>
     public class WorkflowArgumentItem : INotifyPropertyChanged
@@ -696,6 +932,8 @@ namespace ActiproRoslynPOC.Views
         private Type _type;
         private string _typeName;
         private string _value;
+        private WorkflowWorkflowArgumentDirection _direction;
+        private bool _isReadOnly;
 
         public string Name
         {
@@ -734,6 +972,29 @@ namespace ActiproRoslynPOC.Views
             {
                 _value = value;
                 OnPropertyChanged(nameof(Value));
+            }
+        }
+
+        public WorkflowWorkflowArgumentDirection Direction
+        {
+            get => _direction;
+            set
+            {
+                _direction = value;
+                OnPropertyChanged(nameof(Direction));
+            }
+        }
+
+        /// <summary>
+        /// 参数名是否只读（从工作流定义读取的参数名不可修改）
+        /// </summary>
+        public bool IsReadOnly
+        {
+            get => _isReadOnly;
+            set
+            {
+                _isReadOnly = value;
+                OnPropertyChanged(nameof(IsReadOnly));
             }
         }
 

@@ -1,24 +1,165 @@
 using ActiproRoslynPOC.Views;
-using ReflectionMagic;
 using System;
 using System.Activities;
 using System.Activities.Presentation;
 using System.Activities.Presentation.Model;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace ActiproRoslynPOC.Activities
 {
     /// <summary>
     /// InvokeCodedWorkflow 的自定义设计器
-    /// 提供友好的参数输入界面
+    /// 提供友好的参数输入界面（类似 UiPath 风格）
     /// </summary>
     public partial class InvokeCodedWorkflowDesigner : ActivityDesigner
     {
+        // 保存当前参数列表，用于在设计器中预览
+        private List<WorkflowArgumentItem> _currentArguments = new List<WorkflowArgumentItem>();
+
         public InvokeCodedWorkflowDesigner()
         {
             InitializeComponent();
+            Loaded += OnDesignerLoaded;
+        }
+
+        private void OnDesignerLoaded(object sender, RoutedEventArgs e)
+        {
+            UpdateArgumentsPreview();
+        }
+
+        /// <summary>
+        /// 更新参数预览显示
+        /// </summary>
+        private void UpdateArgumentsPreview()
+        {
+            try
+            {
+                if (_currentArguments.Count == 0)
+                {
+                    // 尝试从已保存的 VB 表达式中加载参数
+                    LoadArgumentsFromExpression();
+                }
+
+                if (_currentArguments.Count > 0)
+                {
+                    var sb = new StringBuilder();
+                    foreach (var arg in _currentArguments)
+                    {
+                        var directionStr = arg.Direction == WorkflowWorkflowArgumentDirection.In ? "→" :
+                                          arg.Direction == WorkflowWorkflowArgumentDirection.Out ? "←" : "↔";
+                        sb.AppendLine($"{directionStr} {arg.Name} ({arg.TypeName}): {arg.Value}");
+                    }
+                    ArgumentsPreviewTextBlock.Text = sb.ToString().TrimEnd();
+                    ArgumentsPreviewTextBlock.Foreground = System.Windows.Media.Brushes.Black;
+                }
+                else
+                {
+                    ArgumentsPreviewTextBlock.Text = "(点击上方按钮编辑参数)";
+                    ArgumentsPreviewTextBlock.Foreground = System.Windows.Media.Brushes.Gray;
+                }
+            }
+            catch
+            {
+                // 忽略预览错误
+            }
+        }
+
+        /// <summary>
+        /// 从已保存的 VB 表达式加载参数（用于重新打开设计器时恢复）
+        /// </summary>
+        private void LoadArgumentsFromExpression()
+        {
+            try
+            {
+                var argumentsProperty = this.ModelItem.Properties["Arguments"];
+                if (argumentsProperty?.Value != null)
+                {
+                    var modelItem = argumentsProperty.Value;
+                    var expressionProperty = modelItem.Properties["Expression"];
+
+                    if (expressionProperty?.Value != null)
+                    {
+                        var expression = expressionProperty.Value;
+                        var exprTextProperty = expression.Properties["ExpressionText"];
+                        if (exprTextProperty?.ComputedValue != null)
+                        {
+                            var vbExpression = exprTextProperty.ComputedValue.ToString();
+                            if (!string.IsNullOrWhiteSpace(vbExpression) && vbExpression != "Nothing")
+                            {
+                                // 简单解析以显示预览
+                                ParseVBExpressionForPreview(vbExpression);
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 忽略加载错误
+            }
+        }
+
+        /// <summary>
+        /// 简单解析 VB 表达式用于预览显示
+        /// </summary>
+        private void ParseVBExpressionForPreview(string vbExpression)
+        {
+            _currentArguments.Clear();
+
+            try
+            {
+                var startIndex = vbExpression.IndexOf("From {");
+                if (startIndex < 0) return;
+
+                var content = vbExpression.Substring(startIndex + 6);
+                var endIndex = content.LastIndexOf("}");
+                if (endIndex < 0) return;
+
+                content = content.Substring(0, endIndex).Trim();
+
+                // 简单的键值对解析
+                int braceLevel = 0;
+                int pairStart = 0;
+
+                for (int i = 0; i < content.Length; i++)
+                {
+                    if (content[i] == '{')
+                    {
+                        if (braceLevel == 0) pairStart = i;
+                        braceLevel++;
+                    }
+                    else if (content[i] == '}')
+                    {
+                        braceLevel--;
+                        if (braceLevel == 0)
+                        {
+                            var pair = content.Substring(pairStart + 1, i - pairStart - 1).Trim();
+                            var commaIndex = pair.IndexOf(',');
+                            if (commaIndex > 0)
+                            {
+                                var key = pair.Substring(0, commaIndex).Trim().Trim('"');
+                                var value = pair.Substring(commaIndex + 1).Trim();
+
+                                _currentArguments.Add(new WorkflowArgumentItem
+                                {
+                                    Name = key,
+                                    Value = value,
+                                    TypeName = "Object",
+                                    Direction = WorkflowWorkflowArgumentDirection.In
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 解析失败则忽略
+            }
         }
 
         /// <summary>
@@ -29,47 +170,7 @@ namespace ActiproRoslynPOC.Activities
             try
             {
                 // 获取工作流文件路径
-                string workflowPath = null;
-
-                try
-                {
-                    // 方法1: 尝试从 ComputedValue 获取
-                    var pathValue = this.ModelItem.Properties["WorkflowFilePath"].ComputedValue;
-                    if (pathValue != null)
-                    {
-                        workflowPath = pathValue.AsDynamic().Expression.ToString();
-                    }
-                }
-                catch
-                {
-                    // 方法2: 尝试从 Value 的表达式文本获取
-                    try
-                    {
-                        var pathProperty = this.ModelItem.Properties["WorkflowFilePath"];
-                        if (pathProperty?.Value != null)
-                        {
-                            var propValue = pathProperty.Value;
-                            // 检查是否是 VisualBasicValue
-                            var exprTextProp = propValue.GetType().GetProperty("ExpressionText");
-                            if (exprTextProp != null)
-                            {
-                                var exprText = exprTextProp.GetValue(propValue)?.ToString();
-                                if (!string.IsNullOrWhiteSpace(exprText))
-                                {
-                                    // 移除引号
-                                    workflowPath = exprText.Trim('"');
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-
-                if (string.IsNullOrWhiteSpace(workflowPath))
-                {
-                    MessageBox.Show("请先在 '工作流文件' 字段中输入工作流文件路径", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
+                string workflowPath = GetWorkflowFilePath();
 
                 // 创建对话框
                 var dialog = new WorkflowArgumentEditorDialog
@@ -77,71 +178,151 @@ namespace ActiproRoslynPOC.Activities
                     Owner = Window.GetWindow(this)
                 };
 
-                // 设置工作流路径并分析参数
+                // 先设置工作流路径并自动分析参数定义
                 if (!string.IsNullOrWhiteSpace(workflowPath))
                 {
                     dialog.SetWorkflowPath(workflowPath);
                 }
 
-                // 尝试从 VB 表达式加载已有参数值
-                try
-                {
-                    var argumentsProperty = this.ModelItem.Properties["Arguments"];
-                    if (argumentsProperty?.Value != null)
-                    {
-                        // argumentsProperty.Value 是 ModelItem,需要获取其 Properties["Expression"]
-                        var modelItem = argumentsProperty.Value;
-                        var expressionProperty = modelItem.Properties["Expression"];
-
-                        if (expressionProperty?.Value != null)
-                        {
-                            // 现在 expressionProperty.Value 应该是 VisualBasicValue<Dictionary<string, object>>
-                            var expression = expressionProperty.Value;
-
-                            // 从 ModelItem 中获取 ExpressionText 属性
-                            var exprTextProperty = expression.Properties["ExpressionText"];
-                            if (exprTextProperty?.ComputedValue != null)
-                            {
-                                var vbExpression = exprTextProperty.ComputedValue.ToString();
-                                if (!string.IsNullOrWhiteSpace(vbExpression))
-                                {
-                                    dialog.LoadFromVBExpression(vbExpression);
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // 如果上面的方法失败，尝试从 ComputedValue 加载
-                    try
-                    {
-                        var currentArguments = this.ModelItem.Properties["Arguments"].ComputedValue as Dictionary<string, object>;
-                        dialog.LoadArgumentValues(currentArguments);
-                    }
-                    catch { }
-                }
+                // 再加载已有参数值（这会把保存的值填充到已分析的参数中）
+                LoadExistingArguments(dialog);
 
                 // 显示对话框
                 if (dialog.ShowDialog() == true && dialog.IsOk)
                 {
-                    // 生成 VB.NET 表达式并设置
-                    string vbExpression = dialog.ToVBExpression();
+                    // 保存参数到 Activity
+                    SaveArguments(dialog);
 
-                    using (ModelEditingScope scope = this.ModelItem.BeginEdit("Edit Arguments"))
+                    // 更新预览
+                    _currentArguments = dialog.Arguments.ToList();
+                    UpdateArgumentsPreview();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"打开参数编辑器失败: {ex.Message}\n\n{ex.StackTrace}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// 获取工作流文件路径
+        /// </summary>
+        private string GetWorkflowFilePath()
+        {
+            try
+            {
+                var pathProperty = this.ModelItem.Properties["WorkflowFilePath"];
+                if (pathProperty?.Value != null)
+                {
+                    // 获取 InArgument 的 Expression 属性的 ComputedValue
+                    var exprModelProperty = pathProperty.Value.Properties["Expression"];
+                    var text = exprModelProperty?.ComputedValue?.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
                     {
-                        // 创建 InArgument 包装 VisualBasicValue
-                        var vbValue = new Microsoft.VisualBasic.Activities.VisualBasicValue<Dictionary<string, object>>(vbExpression);
-                        var inArgument = new InArgument<Dictionary<string, object>>(vbValue);
-
-                        this.ModelItem.Properties["Arguments"].SetValue(inArgument);
-                        scope.Complete();
+                        return text.Trim('"');
                     }
                 }
             }
-            catch (System.Exception ex)
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 加载已有的参数值到对话框
+        /// </summary>
+        private void LoadExistingArguments(WorkflowArgumentEditorDialog dialog)
+        {
+            // 加载 In 参数
+            try
             {
-                MessageBox.Show($"打开参数编辑器失败: {ex.Message}\n\n{ex.StackTrace}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                var argumentsProperty = this.ModelItem.Properties["Arguments"];
+                if (argumentsProperty?.Value != null)
+                {
+                    var modelItem = argumentsProperty.Value;
+                    var expressionProperty = modelItem.Properties["Expression"];
+
+                    if (expressionProperty?.Value != null)
+                    {
+                        var expression = expressionProperty.Value;
+                        var exprTextProperty = expression.Properties["ExpressionText"];
+                        if (exprTextProperty?.ComputedValue != null)
+                        {
+                            var vbExpression = exprTextProperty.ComputedValue.ToString();
+                            if (!string.IsNullOrWhiteSpace(vbExpression))
+                            {
+                                dialog.LoadFromVBExpression(vbExpression);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 加载 Out 参数绑定
+            try
+            {
+                var outputBindingsProperty = this.ModelItem.Properties["OutputBindings"];
+                if (outputBindingsProperty?.Value != null)
+                {
+                    var modelItem = outputBindingsProperty.Value;
+                    var expressionProperty = modelItem.Properties["Expression"];
+
+                    if (expressionProperty?.Value != null)
+                    {
+                        var expression = expressionProperty.Value;
+                        var exprTextProperty = expression.Properties["ExpressionText"];
+                        if (exprTextProperty?.ComputedValue != null)
+                        {
+                            var vbExpression = exprTextProperty.ComputedValue.ToString();
+                            if (!string.IsNullOrWhiteSpace(vbExpression))
+                            {
+                                dialog.LoadOutArgumentsFromVBExpression(vbExpression);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 保存参数到 Activity
+        /// </summary>
+        private void SaveArguments(WorkflowArgumentEditorDialog dialog)
+        {
+            // 获取 In 参数的 VB 表达式
+            string inArgsExpression = dialog.GetInArgumentsVBExpression();
+            // 获取 Out 参数绑定的 VB 表达式
+            string outArgsExpression = dialog.GetOutArgumentsVBExpression();
+
+            using (ModelEditingScope scope = this.ModelItem.BeginEdit("Edit Arguments"))
+            {
+                // 保存 In 参数
+                if (inArgsExpression == "Nothing" || string.IsNullOrWhiteSpace(inArgsExpression))
+                {
+                    this.ModelItem.Properties["Arguments"].SetValue(null);
+                }
+                else
+                {
+                    var vbValue = new Microsoft.VisualBasic.Activities.VisualBasicValue<Dictionary<string, object>>(inArgsExpression);
+                    var inArgument = new InArgument<Dictionary<string, object>>(vbValue);
+                    this.ModelItem.Properties["Arguments"].SetValue(inArgument);
+                }
+
+                // 保存 Out 参数绑定
+                if (outArgsExpression == "Nothing" || string.IsNullOrWhiteSpace(outArgsExpression))
+                {
+                    this.ModelItem.Properties["OutputBindings"].SetValue(null);
+                }
+                else
+                {
+                    var vbValue = new Microsoft.VisualBasic.Activities.VisualBasicValue<Dictionary<string, string>>(outArgsExpression);
+                    var inArgument = new InArgument<Dictionary<string, string>>(vbValue);
+                    this.ModelItem.Properties["OutputBindings"].SetValue(inArgument);
+                }
+
+                scope.Complete();
             }
         }
     }

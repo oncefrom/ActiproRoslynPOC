@@ -11,8 +11,10 @@
         <sapc:ArgumentToExpressionConverter x:Key="ArgumentToExpressionConverter" />
     </sap:ActivityDesigner.Resources>
 
-    <Grid>
+    <Grid MinWidth="350">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -48,7 +50,7 @@
                    FontWeight="SemiBold"/>
 
         <!-- WorkflowFilePath 编辑器 -->
-        <sapv:ExpressionTextBox Grid.Row="1" Grid.Column="1"
+        <sapv:ExpressionTextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
                                 Margin="0,8,8,4"
                                 Height="24"
                                 HintText="工作流文件路径 (如: Workflows/MyWorkflow.cs)"
@@ -59,31 +61,50 @@
                                 MaxLines="1"
                                 xmlns:s="clr-namespace:System;assembly=mscorlib"/>
 
-        <!-- Arguments 标签 -->
-        <TextBlock Grid.Row="2" Grid.Column="0"
-                   Text="参数字典:"
+        <!-- 编辑参数按钮 -->
+        <Button Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3"
+                Content="编辑参数..."
+                Height="28"
+                Margin="8,4,8,4"
+                HorizontalAlignment="Stretch"
+                Click="OnEditArgumentsClick"
+                ToolTip="打开参数编辑器（类似 UiPath 风格）"/>
+
+        <!-- 参数预览区域 -->
+        <Border Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3"
+                Margin="8,4,8,4"
+                BorderBrush="#DDD"
+                BorderThickness="1"
+                Background="#FAFAFA"
+                CornerRadius="3"
+                Padding="8"
+                Visibility="{Binding ElementName=ArgumentsPreviewTextBlock, Path=Text, Converter={StaticResource ArgumentToExpressionConverter}}">
+            <StackPanel>
+                <TextBlock Text="参数预览:" FontWeight="SemiBold" Foreground="#666" Margin="0,0,0,4"/>
+                <TextBlock Name="ArgumentsPreviewTextBlock"
+                           Text="(点击上方按钮编辑参数)"
+                           Foreground="#999"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           MaxHeight="80"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Result 输出 -->
+        <TextBlock Grid.Row="4" Grid.Column="0"
+                   Text="Result:"
                    Margin="8,4,8,8"
-                   VerticalAlignment="Top"
+                   VerticalAlignment="Center"
                    FontWeight="SemiBold"/>
 
-        <!-- Arguments 编辑器 (多行) -->
-        <sapv:ExpressionTextBox Grid.Row="2" Grid.Column="1"
-                                Margin="0,4,4,8"
-                                MinHeight="60"
-                                HintText="New Dictionary(Of String, Object) From {{&quot;key1&quot;, &quot;value1&quot;}, {&quot;key2&quot;, 123}}"
+        <sapv:ExpressionTextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2"
+                                Margin="0,4,8,8"
+                                Height="24"
+                                HintText="接收输出结果的变量"
                                 OwnerActivity="{Binding Path=ModelItem}"
-                                Expression="{Binding Path=ModelItem.Arguments, Mode=TwoWay, Converter={StaticResource ArgumentToExpressionConverter}, ConverterParameter=In}"
-                                UseLocationExpression="False"
-                                VerticalScrollBarVisibility="Auto"/>
-
-        <!-- Arguments 编辑按钮 -->
-        <Button Grid.Row="2" Grid.Column="2"
-                Content="..."
-                Width="30"
-                Height="30"
-                Margin="0,4,8,8"
-                VerticalAlignment="Top"
-                Click="OnEditArgumentsClick"
-                ToolTip="打开参数编辑器"/>
+                                Expression="{Binding Path=ModelItem.Result, Mode=TwoWay, Converter={StaticResource ArgumentToExpressionConverter}, ConverterParameter=Out}"
+                                ExpressionType="s:Object"
+                                UseLocationExpression="True"
+                                xmlns:s="clr-namespace:System;assembly=mscorlib"/>
     </Grid>
 </sap:ActivityDesigner>

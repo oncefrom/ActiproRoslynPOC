@@ -72,11 +72,6 @@ namespace ActiproRoslynPOC.Models
             }
         }
 
-        /// <summary>
-        /// 显示名称（带图标）
-        /// </summary>
-        public string DisplayName => $"{Icon} {Name}";
-
         public event PropertyChangedEventHandler PropertyChanged;
 
         protected virtual void OnPropertyChanged(string propertyName)

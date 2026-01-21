@@ -1,4 +1,5 @@
 using ActiproRoslynPOC.Views;
+using System;
 using System.Activities;
 using System.Activities.Presentation;
 using System.Activities.Presentation.Model;
@@ -86,31 +87,31 @@ namespace ActiproRoslynPOC.Activities
                     var argumentsProperty = this.ModelItem.Properties["Arguments"];
                     if (argumentsProperty?.Value != null)
                     {
-                        var propValue = argumentsProperty.Value;
-                        // 检查是否是 InArgument<Dictionary<string, object>>
-                        var expressionProp = propValue.GetType().GetProperty("Expression");
-                        if (expressionProp != null)
+                        // argumentsProperty.Value 是 ModelItem,需要获取其 Properties["Expression"]
+                        var modelItem = argumentsProperty.Value;
+                        var expressionProperty = modelItem.Properties["Expression"];
+
+                        if (expressionProperty?.Value != null)
                         {
-                            var expression = expressionProp.GetValue(propValue);
-                            if (expression != null)
+                            // 现在 expressionProperty.Value 应该是 VisualBasicValue<Dictionary<string, object>>
+                            var expression = expressionProperty.Value;
+
+                            // 从 ModelItem 中获取 ExpressionText 属性
+                            var exprTextProperty = expression.Properties["ExpressionText"];
+                            if (exprTextProperty?.ComputedValue != null)
                             {
-                                // 获取 VisualBasicValue 的 ExpressionText
-                                var exprTextProp = expression.GetType().GetProperty("ExpressionText");
-                                if (exprTextProp != null)
+                                var vbExpression = exprTextProperty.ComputedValue.ToString();
+                                if (!string.IsNullOrWhiteSpace(vbExpression))
                                 {
-                                    var vbExpression = exprTextProp.GetValue(expression)?.ToString();
-                                    if (!string.IsNullOrWhiteSpace(vbExpression))
-                                    {
-                                        dialog.LoadFromVBExpression(vbExpression);
-                                    }
+                                    dialog.LoadFromVBExpression(vbExpression);
                                 }
                             }
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 如果失败，尝试从 ComputedValue 加载
+                    // 如果上面的方法失败，尝试从 ComputedValue 加载
                     try
                     {
                         var currentArguments = this.ModelItem.Properties["Arguments"].ComputedValue as Dictionary<string, object>;
