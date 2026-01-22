@@ -1,5 +1,6 @@
 ﻿using ActiproRoslynPOC.Models;
 using ActiproRoslynPOC.Services;
+using GalaSoft.MvvmLight.Command;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -40,6 +41,23 @@ namespace ActiproRoslynPOC.ViewModels
         // 项目管理
         private ProjectConfig _currentProject;
         private string _currentProjectPath;
+
+        /// <summary>
+        /// 当前项目路径
+        /// </summary>
+        public string CurrentProjectPath
+        {
+            get => _currentProjectPath;
+            private set
+            {
+                if (_currentProjectPath != value)
+                {
+                    _currentProjectPath = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
         public ObservableCollection<FileTreeNode> ProjectRootNodes { get; set; } = new ObservableCollection<FileTreeNode>();
 
         public MainViewModel()
@@ -377,18 +395,19 @@ namespace ActiproRoslynPOC.ViewModels
             }
             catch (Exception ex)
             {
-                AppendOutput($"[异常] {ex.Message}");
+                LoggingService.Instance.Error("MainViewModel", "执行工作流失败", ex);
+                AppendOutput($"[错误] {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    AppendOutput($"[内部错误] {ex.InnerException.Message}");
+                }
             }
         }
 
         public string GetProjectDirectory()
         {
-            // 如果有加载的项目，使用项目路径
-            if (!string.IsNullOrEmpty(_currentProjectPath))
-                return _currentProjectPath;
-
-            // 否则使用默认目录（测试用）
-            return @"E:\ai_app\actipro_rpa\TestWorkflows";
+            // 使用配置服务获取工作流目录
+            return ConfigurationService.Instance.GetProjectWorkflowDirectory(CurrentProjectPath);
         }
 
         private void ExecuteWithDependencies(string projectDirectory)
@@ -455,7 +474,12 @@ namespace ActiproRoslynPOC.ViewModels
             }
             catch (Exception ex)
             {
-                AppendOutput($"[异常] {ex.Message}");
+                LoggingService.Instance.Error("MainViewModel", "调试执行失败", ex);
+                AppendOutput($"[错误] {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    AppendOutput($"[内部错误] {ex.InnerException.Message}");
+                }
             }
         }
 
@@ -926,8 +950,12 @@ public class SampleWorkflow : CodedWorkflowBase
             }
             catch (Exception ex)
             {
-                AppendOutput($"[异常] {ex.Message}");
-                AppendOutput($"堆栈: {ex.StackTrace}");
+                LoggingService.Instance.Error("MainViewModel", "启动调试失败", ex);
+                AppendOutput($"[错误] {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    AppendOutput($"[内部错误] {ex.InnerException.Message}");
+                }
                 IsDebugging = false;
             }
         }
@@ -1067,7 +1095,7 @@ public class SampleWorkflow : CodedWorkflowBase
                     return;
                 }
 
-                _currentProjectPath = projectPath;
+                CurrentProjectPath = projectPath;
                 _currentProject = ProjectService.OpenProject(projectPath);
 
                 // 加载文件树
@@ -1086,7 +1114,7 @@ public class SampleWorkflow : CodedWorkflowBase
         /// </summary>
         public void RefreshProjectTree()
         {
-            if (string.IsNullOrEmpty(_currentProjectPath))
+            if (string.IsNullOrEmpty(CurrentProjectPath))
                 return;
 
             // 保存展开状态
@@ -1095,7 +1123,7 @@ public class SampleWorkflow : CodedWorkflowBase
 
             // 重建树
             ProjectRootNodes.Clear();
-            var rootNode = FileTreeNode.FromPath(_currentProjectPath);
+            var rootNode = FileTreeNode.FromPath(CurrentProjectPath);
             rootNode.IsExpanded = true;
             ProjectRootNodes.Add(rootNode);
 
@@ -1189,28 +1217,6 @@ public class SampleWorkflow : CodedWorkflowBase
                     }));
                 }
             }
-        }
-    }
-
-    // 简单的 RelayCommand 实现
-    public class RelayCommand : ICommand
-    {
-        private readonly Action _execute;
-        private readonly Func<bool> _canExecute;
-
-        public RelayCommand(Action execute, Func<bool> canExecute = null)
-        {
-            _execute = execute;
-            _canExecute = canExecute;
-        }
-
-        public bool CanExecute(object parameter) => _canExecute?.Invoke() ?? true;
-        public void Execute(object parameter) => _execute();
-
-        public event EventHandler CanExecuteChanged
-        {
-            add { CommandManager.RequerySuggested += value; }
-            remove { CommandManager.RequerySuggested -= value; }
         }
     }
 }

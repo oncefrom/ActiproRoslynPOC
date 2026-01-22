@@ -381,7 +381,7 @@ namespace ActiproRoslynPOC.Services
                 if (_workflowInstance is CodedWorkflowBase workflowBase)
                 {
                     // 初始化 Services（支持 services.WorkflowInvocationService.RunWorkflow）
-                    workflowBase.Services = new WorkflowServices(@"E:\ai_app\actipro_rpa\TestWorkflows");
+                    workflowBase.Services = new WorkflowServices(ConfigurationService.Instance.DefaultWorkflowDirectory);
 
                     // 传递工作流参数
                     if (_workflowArguments.Count > 0)

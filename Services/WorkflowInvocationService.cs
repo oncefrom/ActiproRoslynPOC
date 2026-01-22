@@ -17,6 +17,10 @@ namespace ActiproRoslynPOC.Services
         private readonly RoslynCompilerService _compiler;
         private readonly Dictionary<string, Assembly> _compiledAssemblies = new Dictionary<string, Assembly>();
 
+        // 使用静态缓存，在所有实例间共享编译结果
+        private static readonly Dictionary<string, CompilationResult> _staticCompilationCache = new Dictionary<string, CompilationResult>();
+        private static readonly object _staticCacheLock = new object();
+
         public WorkflowInvocationService(string workflowDirectory)
         {
             _workflowDirectory = workflowDirectory;
@@ -87,8 +91,32 @@ namespace ActiproRoslynPOC.Services
                 codeFiles[fileName] = File.ReadAllText(filePath);
             }
 
-            // 编译
-            var compileResult = _compiler.CompileMultiple(codeFiles);
+            // 生成缓存键（基于所有文件内容的哈希）
+            var cacheKey = GenerateCacheKey(codeFiles);
+
+            // 使用静态缓存的编译结果（所有实例共享）
+            CompilationResult compileResult;
+            lock (_staticCacheLock)
+            {
+                if (_staticCompilationCache.TryGetValue(cacheKey, out compileResult))
+                {
+                    Console.WriteLine($"[WorkflowInvocationService] ✓ 使用缓存的编译结果 (CacheKey: {cacheKey.Substring(0, 8)}...)");
+                }
+                else
+                {
+                    Console.WriteLine($"[WorkflowInvocationService] ⚙ 编译工作流代码 ({codeFiles.Count} 个文件)");
+                    compileResult = _compiler.CompileMultiple(codeFiles);
+                    if (compileResult.Success)
+                    {
+                        _staticCompilationCache[cacheKey] = compileResult;
+                        Console.WriteLine($"[WorkflowInvocationService] ✓ 编译成功并已缓存 (CacheKey: {cacheKey.Substring(0, 8)}...)");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[WorkflowInvocationService] ✗ 编译失败");
+                    }
+                }
+            }
             if (!compileResult.Success)
             {
                 // 构建详细的错误信息
@@ -180,7 +208,7 @@ namespace ActiproRoslynPOC.Services
             // 订阅日志事件
             xamlService.LogOutput += (msg) =>
             {
-                GlobalLogManager.Log(msg);
+                Console.WriteLine(msg);
             };
 
             // 执行 XAML 工作流
@@ -211,6 +239,48 @@ namespace ActiproRoslynPOC.Services
 
             var xamlService = new XamlWorkflowService();
             return xamlService.GetWorkflowArguments(fullPath);
+        }
+
+        /// <summary>
+        /// 生成缓存键（基于所有文件内容）
+        /// </summary>
+        private string GenerateCacheKey(Dictionary<string, string> codeFiles)
+        {
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var kvp in codeFiles.OrderBy(x => x.Key))
+                {
+                    sb.Append(kvp.Key);
+                    sb.Append(kvp.Value);
+                }
+                var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(sb.ToString()));
+                return Convert.ToBase64String(hash);
+            }
+        }
+
+        /// <summary>
+        /// 清除静态编译缓存（用于调试或强制重新编译）
+        /// </summary>
+        public static void ClearCompilationCache()
+        {
+            lock (_staticCacheLock)
+            {
+                var count = _staticCompilationCache.Count;
+                _staticCompilationCache.Clear();
+                Console.WriteLine($"[WorkflowInvocationService] 已清除 {count} 个缓存的编译结果");
+            }
+        }
+
+        /// <summary>
+        /// 获取当前缓存统计信息
+        /// </summary>
+        public static string GetCacheStats()
+        {
+            lock (_staticCacheLock)
+            {
+                return $"编译缓存: {_staticCompilationCache.Count} 个条目";
+            }
         }
     }
 

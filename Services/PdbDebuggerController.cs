@@ -145,8 +145,8 @@ namespace ActiproRoslynPOC.Services
             }
             catch (Exception ex)
             {
+                LoggingService.Instance.Error("PdbDebuggerController", "启动调试失败", ex);
                 LogMessage($"启动调试失败: {ex.Message}");
-                LogMessage($"堆栈跟踪: {ex.StackTrace}");
                 _isDebugging = false;
                 return false;
             }
@@ -178,6 +178,7 @@ namespace ActiproRoslynPOC.Services
             }
             catch (Exception ex)
             {
+                LoggingService.Instance.Error("PdbDebuggerController", "附加进程失败", ex);
                 LogMessage($"附加进程失败: {ex.Message}");
                 return false;
             }
@@ -209,6 +210,7 @@ namespace ActiproRoslynPOC.Services
             }
             catch (Exception ex)
             {
+                LoggingService.Instance.Error("PdbDebuggerController", "调试监控异常", ex);
                 LogMessage($"调试监控异常: {ex.Message}");
             }
             finally

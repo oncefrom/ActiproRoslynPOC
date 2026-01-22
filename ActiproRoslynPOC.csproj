@@ -52,6 +52,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Activities.Core.Presentation" />
+    <Reference Include="System.Configuration" />
     <Reference Include="System.Data" />
     <Reference Include="System.Numerics" />
     <Reference Include="System.Xml" />
@@ -85,11 +86,13 @@
       <DependentUpon>InvokeWorkflowDesigner.xaml</DependentUpon>
     </Compile>
     <Compile Include="Services\CodeExecutionService.cs" />
+    <Compile Include="Services\ConfigurationService.cs" />
     <Compile Include="Services\ConsoleRedirectWriter.cs" />
     <Compile Include="Services\CSharpFileAnalyzer.cs" />
     <Compile Include="Services\DebuggerServiceV3.cs" />
     <Compile Include="Services\DebuggerServiceV3Enhanced.cs" />
     <Compile Include="Services\GlobalLogManager.cs" />
+    <Compile Include="Services\LoggingService.cs" />
     <Compile Include="Services\PdbDebuggerController.cs" />
     <Compile Include="Services\PdbReaderService.cs" />
     <Compile Include="Services\RoslynCompilerService.cs" />
@@ -121,7 +124,10 @@
     <Compile Include="Debugging\ElapsedTimeAdornmentManager.cs" />
     <Compile Include="Debugging\ElapsedTimeTag.cs" />
     <Compile Include="Debugging\ElapsedTimeTagger.cs" />
+    <Compile Include="ViewModels\DebugControlViewModel.cs" />
+    <Compile Include="ViewModels\FileManagementViewModel.cs" />
     <Compile Include="ViewModels\MainViewModel.cs" />
+    <Compile Include="ViewModels\ProjectManagementViewModel.cs" />
     <Compile Include="Views\EditorSettingsDialog.xaml.cs">
       <DependentUpon>EditorSettingsDialog.xaml</DependentUpon>
     </Compile>
@@ -230,6 +236,9 @@
     </PackageReference>
     <PackageReference Include="Microsoft.Diagnostics.Runtime">
       <Version>3.1.512801</Version>
+    </PackageReference>
+    <PackageReference Include="MvvmLightLibs">
+      <Version>5.4.1.1</Version>
     </PackageReference>
     <PackageReference Include="ReflectionMagic">
       <Version>5.0.1</Version>

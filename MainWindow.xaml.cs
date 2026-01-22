@@ -29,6 +29,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using GalaSoft.MvvmLight.Command;
 
 namespace ActiproRoslynPOC
 {
@@ -103,7 +104,7 @@ namespace ActiproRoslynPOC
         /// </summary>
         private void OpenDefaultFile()
         {
-            var projectDirectory = @"E:\ai_app\actipro_rpa\TestWorkflows";
+            var projectDirectory = ConfigurationService.Instance.DefaultWorkflowDirectory;
             var defaultFilePath = Path.Combine(projectDirectory, "MainWorkflow.cs");
 
             if (File.Exists(defaultFilePath))
@@ -212,7 +213,7 @@ namespace ActiproRoslynPOC
             System.Diagnostics.Debug.WriteLine("[MainWindow] 调试功能服务已注册");
 
             // 加载目录下的所有 .cs 文件
-            LoadDirectorySourceFiles(@"E:\ai_app\actipro_rpa\TestWorkflows");
+            LoadDirectorySourceFiles(ConfigurationService.Instance.DefaultWorkflowDirectory);
         }
 
         /// <summary>
@@ -432,7 +433,11 @@ namespace ActiproRoslynPOC
             var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, containerGrid)
             {
                 Description = filePath,
-                Tag = filePath  // 存储完整路径
+                Tag = new DocumentInfo  // 使用统一的 DocumentInfo 结构
+                {
+                    FilePath = filePath,
+                    IsModified = false
+                }
             };
 
             // 添加到字典
@@ -458,6 +463,20 @@ namespace ActiproRoslynPOC
             if (_viewModel.CurrentFilePath == filePath)
             {
                 _viewModel.Code = editor.Document.CurrentSnapshot.Text;
+            }
+
+            // 标记文档为已修改
+            if (_openDocuments.TryGetValue(filePath, out DocumentWindow docWindow))
+            {
+                if (docWindow.Tag is DocumentInfo docInfo && !docInfo.IsModified)
+                {
+                    docInfo.IsModified = true;
+                    // 在标题上添加星号
+                    if (!docWindow.Title.EndsWith("*"))
+                    {
+                        docWindow.Title = Path.GetFileName(filePath) + "*";
+                    }
+                }
             }
         }
 
@@ -502,7 +521,13 @@ namespace ActiproRoslynPOC
         private string GetActiveFilePath()
         {
             var activeDoc = dockSite.ActiveWindow as DocumentWindow;
-            return activeDoc?.Tag as string;
+            if (activeDoc == null) return null;
+
+            // 支持新旧两种 Tag 结构
+            if (activeDoc.Tag is DocumentInfo docInfo)
+                return docInfo.FilePath;
+
+            return activeDoc.Tag as string;  // 向后兼容旧的 string Tag
         }
 
         #endregion
@@ -517,7 +542,13 @@ namespace ActiproRoslynPOC
         {
             if (e.Window is DocumentWindow docWindow)
             {
-                string filePath = docWindow.Tag as string;
+                // 支持新旧两种 Tag 结构
+                string filePath = null;
+                if (docWindow.Tag is DocumentInfo docInfo)
+                    filePath = docInfo.FilePath;
+                else
+                    filePath = docWindow.Tag as string;
+
                 var editor = GetEditorFromDocumentWindow(docWindow);
 
                 if (!string.IsNullOrEmpty(filePath) && editor != null)
@@ -546,10 +577,21 @@ namespace ActiproRoslynPOC
             if (!_openDocuments.TryGetValue(filePath, out DocumentWindow docWindow))
                 return;
 
+            // 获取 DocumentInfo
+            DocumentInfo docInfo = null;
+            if (docWindow.Tag is DocumentInfo info)
+                docInfo = info;
+
             // 检查是否是工作流设计器
             if (docWindow.Tag is WorkflowDocumentInfo workflowInfo)
             {
                 SaveWorkflowDesigner(workflowInfo);
+
+                // 清除修改标志和标题星号
+                if (docInfo != null)
+                    docInfo.IsModified = false;
+
+                docWindow.Title = Path.GetFileName(filePath);  // 移除星号
                 return;
             }
 
@@ -564,6 +606,13 @@ namespace ActiproRoslynPOC
 
                 // 关键：标记文档为未修改状态（清除行号旁的修改标记）
                 editor.Document.IsModified = false;
+
+                // 更新 DocumentInfo
+                if (docInfo != null)
+                    docInfo.IsModified = false;
+
+                // 移除标题中的星号
+                docWindow.Title = Path.GetFileName(filePath);
 
                 // 同步到 SourceFile
                 _projectAssembly.SourceFiles.QueueCode(_csharpLanguage, filePath, content);
@@ -587,7 +636,17 @@ namespace ActiproRoslynPOC
             string filePath = GetActiveFilePath();
             if (!string.IsNullOrEmpty(filePath))
             {
+                AppendOutput($"[快捷键] Ctrl+S 触发保存: {Path.GetFileName(filePath)}");
                 SaveDocument(filePath);
+            }
+            else
+            {
+                AppendOutput($"[快捷键] Ctrl+S 触发，但未找到活动文档");
+                var activeDoc = dockSite.ActiveWindow as DocumentWindow;
+                if (activeDoc != null)
+                {
+                    AppendOutput($"  当前窗口: {activeDoc.Title}, Tag类型: {activeDoc.Tag?.GetType().Name ?? "null"}");
+                }
             }
         }
 
@@ -783,7 +842,7 @@ namespace ActiproRoslynPOC
         /// </summary>
         private void OnInvokeWorkflowClick(object sender, RoutedEventArgs e)
         {
-            var projectDirectory = @"E:\ai_app\actipro_rpa\TestWorkflows";
+            var projectDirectory = ConfigurationService.Instance.GetProjectWorkflowDirectory(_viewModel?.CurrentProjectPath);
 
             var dialog = new InvokeWorkflowDialog(projectDirectory)
             {
@@ -1465,28 +1524,34 @@ namespace ActiproRoslynPOC
                 // 使用增强的布局（包含工具箱、设计器、属性面板、变量面板）
                 var layout = WorkflowDesignerHelper.CreateEnhancedDesignerLayout(designer);
 
+                // 创建文档信息
+                var docInfo = new WorkflowDocumentInfo
+                {
+                    FilePath = filePath,
+                    Designer = designer,
+                    IsModified = false
+                };
+
                 // 创建文档窗口
                 var docWindow = new DocumentWindow(dockSite, Path.GetFileName(filePath), Path.GetFileName(filePath), null, layout)
                 {
                     Description = filePath,
-                    Tag = filePath
+                    Tag = docInfo  // 使用统一的 DocumentInfo 结构
                 };
 
                 // 监听设计器变化以标记文件为已修改
                 designer.ModelChanged += (s, e) =>
                 {
-                    // 标记文档已修改（可以在标题显示 * 号）
-                    if (!docWindow.Title.EndsWith("*"))
+                    // 标记文档已修改
+                    if (!docInfo.IsModified)
                     {
-                        docWindow.Title = Path.GetFileName(filePath) + "*";
+                        docInfo.IsModified = true;
+                        // 在标题显示 * 号
+                        if (!docWindow.Title.EndsWith("*"))
+                        {
+                            docWindow.Title = Path.GetFileName(filePath) + "*";
+                        }
                     }
-                };
-
-                // 保存设计器引用到文档 Tag（用于保存时获取）
-                docWindow.Tag = new WorkflowDocumentInfo
-                {
-                    FilePath = filePath,
-                    Designer = designer
                 };
 
                 // 添加到字典
@@ -1685,12 +1750,20 @@ namespace ActiproRoslynPOC
         }
 
         /// <summary>
-        /// 工作流文档信息（用于存储在 DocumentWindow.Tag 中）
+        /// 文档信息（统一存储在 DocumentWindow.Tag 中）
         /// </summary>
-        private class WorkflowDocumentInfo
+        private class DocumentInfo
         {
             public string FilePath { get; set; }
-            public System.Activities.Presentation.WorkflowDesigner Designer { get; set; }
+            public System.Activities.Presentation.WorkflowDesigner Designer { get; set; }  // 仅 XAML 工作流使用
+            public bool IsModified { get; set; }  // 修改标志
+        }
+
+        /// <summary>
+        /// 工作流文档信息（向后兼容）
+        /// </summary>
+        private class WorkflowDocumentInfo : DocumentInfo
+        {
         }
 
         #endregion

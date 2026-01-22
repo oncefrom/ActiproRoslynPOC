@@ -107,7 +107,7 @@ namespace ActiproRoslynPOC.Models
         {
             // 优先使用全局事件 (避免重复输出)
             // 时间戳由 AppendOutput 统一添加
-            GlobalLogManager.Log(message);
+            Console.WriteLine(message);
 
             // 保留实例级别事件 (向后兼容,但不添加时间戳,避免重复)
             // 如果有订阅者,也会收到通知
