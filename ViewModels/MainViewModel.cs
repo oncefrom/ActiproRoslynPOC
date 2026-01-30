@@ -17,149 +17,176 @@ namespace ActiproRoslynPOC.ViewModels
 {
     public class MainViewModel : INotifyPropertyChanged
     {
-        private string _code;
-        private string _output;
+        // 子 ViewModels (职责分离)
+        private readonly FileManagementViewModel _fileManagement;
+        private readonly ProjectManagementViewModel _projectManagement;
+        private readonly DebugControlViewModel _debugControl;
+
+        // 核心服务
         private readonly RoslynCompilerService _compiler;
         private readonly CodeExecutionService _executor;
-        private readonly DebuggerServiceV3Enhanced _debugger;  // PDB 增强版
+        private readonly DebuggerServiceV3Enhanced _debugger;
 
-        // 文件追踪
-        private string _currentFilePath;
-        private bool _isModified;
-        private bool _isLoadingFile;
-
-        // 调试状态
-        private bool _isDebugging;
-        private int _currentDebugLine = -1;
-        private string _variablesText;
+        // 输出和编译
+        private string _output;
 
         // 工作流参数
         private readonly WorkflowParameterService _parameterService = new WorkflowParameterService();
         private WorkflowSignatureInfo _currentWorkflowSignature;
-        private Dictionary<string, string> _workflowArguments = new Dictionary<string, string>();
 
-        // 项目管理
+        // 项目管理（委托给 ProjectManagementViewModel）
         private ProjectConfig _currentProject;
-        private string _currentProjectPath;
 
         /// <summary>
-        /// 当前项目路径
+        /// 文件管理 ViewModel
         /// </summary>
-        public string CurrentProjectPath
-        {
-            get => _currentProjectPath;
-            private set
-            {
-                if (_currentProjectPath != value)
-                {
-                    _currentProjectPath = value;
-                    OnPropertyChanged();
-                }
-            }
-        }
+        public FileManagementViewModel FileManagement => _fileManagement;
 
-        public ObservableCollection<FileTreeNode> ProjectRootNodes { get; set; } = new ObservableCollection<FileTreeNode>();
+        /// <summary>
+        /// 项目管理 ViewModel
+        /// </summary>
+        public ProjectManagementViewModel ProjectManagement => _projectManagement;
+
+        /// <summary>
+        /// 调试控制 ViewModel
+        /// </summary>
+        public DebugControlViewModel DebugControl => _debugControl;
+
+        /// <summary>
+        /// 项目根节点（委托给 ProjectManagementViewModel）
+        /// </summary>
+        public ObservableCollection<FileTreeNode> ProjectRootNodes => _projectManagement.ProjectTree;
+
+        /// <summary>
+        /// 当前项目路径（委托给 ProjectManagementViewModel）
+        /// </summary>
+        public string CurrentProjectPath => _projectManagement.CurrentProjectPath;
 
         public MainViewModel()
         {
-
+            // 初始化核心服务
             _compiler = new RoslynCompilerService();
             _executor = new CodeExecutionService();
-            // LogEvent subscription removed - GlobalLogManager handles all logs
-
-            // 初始化调试服务 V3 Enhanced (PDB 增强版)
             _debugger = new DebuggerServiceV3Enhanced();
-            _debugger.CurrentLineChanged += OnDebuggerCurrentLineChanged;
-            _debugger.BreakpointHit += OnDebuggerBreakpointHit;
-            _debugger.DebugSessionEnded += OnDebugSessionEnded;
-            _debugger.VariablesUpdated += OnVariablesUpdated;
-            _debugger.OutputMessage += (msg) => AppendOutput(msg);
 
-            // --- 订阅全局 Log 管理器 (捕获所有工作流实例的 Log) ---
+            // 初始化子 ViewModels
+            _fileManagement = new FileManagementViewModel();
+            _projectManagement = new ProjectManagementViewModel();
+            _debugControl = new DebugControlViewModel(_debugger, _compiler);
+
+            // 订阅文件管理事件
+            _fileManagement.PropertyChanged += OnFileManagementPropertyChanged;
+            _fileManagement.OutputMessageReceived += AppendOutput;
+            _fileManagement.FileLoaded += OnFileLoaded;
+            _fileManagement.FileSaved += OnFileSaved;
+
+            // 订阅项目管理事件
+            _projectManagement.OutputMessageReceived += AppendOutput;
+            _projectManagement.FileSelected += OnFileSelected;
+
+            // 订阅调试控制事件（暂时注释，稍后启用）
+            //_debugControl.OutputMessageReceived += AppendOutput;
+            //_debugControl.CurrentLineChanged += OnDebugLineChanged;
+            //_debugControl.BreakpointHit += OnDebugBreakpointHit;
+            //_debugControl.DebugSessionEnded += OnDebugEnded;
+
+            // 订阅全局 Log 管理器
             GlobalLogManager.LogReceived += (msg) => AppendOutput(msg);
 
-            // --- 新增：重定向 Console 输出 ---
-            // 将所有 Console.Write/WriteLine 转发给 AppendOutput 方法
+            // 重定向 Console 输出
             var consoleWriter = new ConsoleRedirectWriter(msg => AppendOutput(msg));
             Console.SetOut(consoleWriter);
 
-            // 命令
+            // 初始化命令
             RunCommand = new RelayCommand(ExecuteRun);
             CheckSyntaxCommand = new RelayCommand(ExecuteCheckSyntax);
             ClearOutputCommand = new RelayCommand(() => Output = "");
-            SaveCommand = new RelayCommand(ExecuteSave, CanExecuteSave);
-            OpenFileCommand = new RelayCommand(ExecuteOpenFile);
 
-            // 调试命令
-            StartDebugCommand = new RelayCommand(() => ExecuteStartDebug(), () => !IsDebugging);
-            StopDebugCommand = new RelayCommand(ExecuteStopDebug, () => IsDebugging);
-            StepOverCommand = new RelayCommand(async () => await ExecuteStepOverAsync(), () => IsDebugging);
-            ContinueCommand = new RelayCommand(async () => await ExecuteContinueAsync(), () => IsDebugging);
+            // 文件命令（委托给 FileManagementViewModel）
+            SaveCommand = _fileManagement.SaveCommand;
+            OpenFileCommand = _fileManagement.OpenFileCommand;
+            NewFileCommand = _fileManagement.NewFileCommand;
 
-            // 在构造函数中初始化
-            NewFileCommand = new RelayCommand(ExecuteNewFile);
+            // 调试命令（暂时注释）
+            //StartDebugCommand = _debugControl.StartDebugCommand;
+            //StopDebugCommand = _debugControl.StopDebugCommand;
+            //StepOverCommand = _debugControl.StepOverCommand;
+            //ContinueCommand = _debugControl.ContinueCommand;
+
+            // 初始化集合
             Diagnostics = new ObservableCollection<DiagnosticInfo>();
 
             // 启动时加载默认文件
             LoadDefaultFile();
         }
 
+        #region 属性（委托给子 ViewModels）
+
+        /// <summary>
+        /// 代码内容（委托给 FileManagementViewModel）
+        /// </summary>
         public string Code
         {
-            get => _code;
+            get => _fileManagement.Code;
             set
             {
-                if (_code != value)
+                if (_fileManagement.Code != value)
                 {
-                    _code = value;
+                    _fileManagement.Code = value;
                     OnPropertyChanged();
-
-                    // 标记为已修改（仅当不是加载文件时）
-                    if (!string.IsNullOrEmpty(CurrentFilePath) && !_isLoadingFile)
-                    {
-                        IsModified = true;
-                    }
+                    AnalyzeWorkflowSignature(); // 分析工作流签名
                 }
             }
         }
 
+        /// <summary>
+        /// 当前文件路径（委托给 FileManagementViewModel）
+        /// </summary>
         public string CurrentFilePath
         {
-            get => _currentFilePath;
+            get => _fileManagement.CurrentFilePath;
             set
             {
-                if (_currentFilePath != value)
+                _fileManagement.PropertyChanged -= OnFileManagementPropertyChanged;
+                if (_fileManagement.CurrentFilePath != value)
                 {
-                    _currentFilePath = value;
+                    // 通过 setter 触发
+                    // FileManagementViewModel 内部会触发 PropertyChanged
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(CurrentFileName));
                     OnPropertyChanged(nameof(WindowTitle));
                 }
+                _fileManagement.PropertyChanged += OnFileManagementPropertyChanged;
             }
         }
 
-        public string CurrentFileName =>
-            string.IsNullOrEmpty(CurrentFilePath)
-                ? "未命名"
-                : Path.GetFileName(CurrentFilePath);
+        /// <summary>
+        /// 当前文件名（委托给 FileManagementViewModel）
+        /// </summary>
+        public string CurrentFileName => _fileManagement.CurrentFileName;
 
+        /// <summary>
+        /// 是否已修改（委托给 FileManagementViewModel）
+        /// </summary>
         public bool IsModified
         {
-            get => _isModified;
+            get => _fileManagement.IsModified;
             set
             {
-                if (_isModified != value)
+                if (_fileManagement.IsModified != value)
                 {
-                    _isModified = value;
+                    _fileManagement.IsModified = value;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(WindowTitle));
-                    CommandManager.InvalidateRequerySuggested(); // 刷新命令状态
+                    CommandManager.InvalidateRequerySuggested();
                 }
             }
         }
 
-        public string WindowTitle =>
-            $"{(IsModified ? "*" : "")}{CurrentFileName} - Actipro Roslyn POC";
+        /// <summary>
+        /// 窗口标题（委托给 FileManagementViewModel）
+        /// </summary>
+        public string WindowTitle => _fileManagement.WindowTitle;
 
         public string Output
         {
@@ -203,13 +230,20 @@ namespace ActiproRoslynPOC.ViewModels
 
         public Dictionary<string, string> WorkflowArguments
         {
-            get => _workflowArguments;
+            get => _debugControl.WorkflowArguments;
             set
             {
-                _workflowArguments = value;
+                if (value != null)
+                {
+                    foreach (var kvp in value)
+                    {
+                        _debugControl.SetWorkflowArgument(kvp.Key, kvp.Value);
+                    }
+                }
                 OnPropertyChanged();
             }
         }
+        #endregion
 
         /// <summary>
         /// 分析当前代码的工作流签名
@@ -276,48 +310,26 @@ namespace ActiproRoslynPOC.ViewModels
         /// </summary>
         public void SetWorkflowArgument(string name, string value)
         {
-            _workflowArguments[name] = value;
+            _debugControl.SetWorkflowArgument(name, value);
         }
 
-        // 调试状态属性
+        // 调试状态属性（委托给 DebugControlViewModel）
         public bool IsDebugging
         {
-            get => _isDebugging;
-            set
-            {
-                if (_isDebugging != value)
-                {
-                    _isDebugging = value;
-                    OnPropertyChanged();
-                    CommandManager.InvalidateRequerySuggested();
-                }
-            }
+            get => _debugControl.IsDebugging;
+            set { /* 只读属性，但支持绑定 */ }
         }
 
         public int CurrentDebugLine
         {
-            get => _currentDebugLine;
-            set
-            {
-                if (_currentDebugLine != value)
-                {
-                    _currentDebugLine = value;
-                    OnPropertyChanged();
-                }
-            }
+            get => _debugControl.CurrentDebugLine;
+            set { /* 只读属性，但支持绑定 */ }
         }
 
         public string VariablesText
         {
-            get => _variablesText;
-            set
-            {
-                if (_variablesText != value)
-                {
-                    _variablesText = value;
-                    OnPropertyChanged();
-                }
-            }
+            get => _debugControl.VariablesText;
+            set { /* 只读属性，但支持绑定 */ }
         }
 
 
@@ -501,7 +513,7 @@ namespace ActiproRoslynPOC.ViewModels
             // 将 UI 中设置的参数值传递给工作流
             foreach (var param in signature.InputParameters)
             {
-                if (_workflowArguments.TryGetValue(param.Name, out var stringValue))
+                if (WorkflowArguments.TryGetValue(param.Name, out var stringValue))
                 {
                     var convertedValue = _parameterService.ConvertValue(stringValue, param.ParameterType);
                     workflow.Arguments[param.Name] = convertedValue;
@@ -752,32 +764,11 @@ public class SampleWorkflow : CodedWorkflowBase
         }
 
         /// <summary>
-        /// 加载指定文件到编辑器
+        /// 加载指定文件到编辑器（委托给 FileManagementViewModel）
         /// </summary>
         public void LoadFile(string filePath)
         {
-            try
-            {
-                if (!File.Exists(filePath))
-                {
-                    AppendOutput($"[错误] 文件不存在: {filePath}");
-                    return;
-                }
-
-                _isLoadingFile = true;
-                var code = File.ReadAllText(filePath);
-                Code = code;
-                CurrentFilePath = filePath;
-                IsModified = false;
-                _isLoadingFile = false;
-
-                AppendOutput($"已加载文件: {Path.GetFileName(filePath)}");
-            }
-            catch (Exception ex)
-            {
-                _isLoadingFile = false;
-                AppendOutput($"[错误] 加载文件失败: {ex.Message}");
-            }
+            _fileManagement.LoadFile(filePath);
         }
 
         /// <summary>
@@ -853,182 +844,182 @@ public class SampleWorkflow : CodedWorkflowBase
         /// <summary>
         /// 开始调试 (PDB 增强版)
         /// </summary>
-        private async void ExecuteStartDebug()
-        {
-            try
-            {
-                Output = "";
-                AppendOutput("=== 开始调试 (PDB 增强版) ===");
-
-                // 从当前活动编辑器获取断点
-                var breakpoints = GetBreakpointsFromUI?.Invoke() ?? new List<int>();
-                _debugger.SetBreakpoints(breakpoints);
-
-                AppendOutput($"设置了 {breakpoints.Count} 个断点: {string.Join(", ", breakpoints)}");
-
-                // 先保存当前编辑器中的代码（如果有修改）
-                if (IsModified && !string.IsNullOrEmpty(CurrentFilePath))
-                {
-                    AppendOutput("检测到未保存的修改，自动保存中...");
-                    ExecuteSave();
-                }
-
-                string projectDirectory = GetProjectDirectory();
-
-                // 检查是否有其他依赖文件（同目录下的其他 .cs 文件）
-                bool hasOtherCsFiles = !string.IsNullOrEmpty(projectDirectory) &&
-                                      Directory.Exists(projectDirectory) &&
-                                      Directory.GetFiles(projectDirectory, "*.cs").Length > 1;
-
-                AppendOutput($"调试文件: {CurrentFileName}");
-
-                var codeFiles = new Dictionary<string, string>();
-
-                if (hasOtherCsFiles)
-                {
-                    // 多文件模式：加载所有文件以满足依赖，但只调试当前文件
-                    AppendOutput($"检测到项目目录中有其他文件，加载依赖文件...");
-
-                    var csFiles = Directory.GetFiles(projectDirectory, "*.cs", SearchOption.AllDirectories);
-                    foreach (var filePath in csFiles)
-                    {
-                        var fileName = Path.GetFileName(filePath);
-
-                        // 当前文件使用编辑器中的代码（可能有未保存的修改）
-                        if (fileName.Equals(CurrentFileName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            codeFiles[fileName] = Code;
-                            AppendOutput($"  [主] {fileName}");
-                        }
-                        else
-                        {
-                            // 其他文件从磁盘读取
-                            var fileCode = File.ReadAllText(filePath);
-                            codeFiles[fileName] = fileCode;
-                            AppendOutput($"  [依赖] {fileName}");
-                        }
-                    }
-                }
-                else
-                {
-                    // 单文件模式：只有当前文件
-                    codeFiles[CurrentFileName] = Code;
-                }
-
-                // 设置工作流参数（从 UI 获取）
-                var debugArguments = new Dictionary<string, object>();
-                if (CurrentWorkflowSignature?.HasCustomParameters == true)
-                {
-                    foreach (var param in CurrentWorkflowSignature.InputParameters)
-                    {
-                        if (_workflowArguments.TryGetValue(param.Name, out var stringValue))
-                        {
-                            debugArguments[param.Name] = _parameterService.ConvertValue(stringValue, param.ParameterType);
-                        }
-                        else if (param.HasDefaultValue)
-                        {
-                            debugArguments[param.Name] = param.DefaultValue;
-                        }
-                    }
-                }
-                _debugger.SetWorkflowArguments(debugArguments);
-
-                // 启动调试：PDB 增强版会自动进行智能插桩
-                // 明确指定当前文件为主调试对象
-                bool success = await _debugger.StartDebuggingAsync(codeFiles, _compiler, CurrentFileName);
-
-                if (success)
-                {
-                    IsDebugging = true;
-                    AppendOutput("✓ 调试启动成功");
-                }
-                else
-                {
-                    AppendOutput("[错误] 调试启动失败");
-                    IsDebugging = false;
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggingService.Instance.Error("MainViewModel", "启动调试失败", ex);
-                AppendOutput($"[错误] {ex.Message}");
-                if (ex.InnerException != null)
-                {
-                    AppendOutput($"[内部错误] {ex.InnerException.Message}");
-                }
-                IsDebugging = false;
-            }
-        }
-
-        /// <summary>
-        /// 停止调试
-        /// </summary>
-        private void ExecuteStopDebug()
-        {
-            _debugger.StopDebugging();
-            IsDebugging = false;
-            AppendOutput("=== 调试已停止 ===");
-        }
-
-        /// <summary>
-        /// 单步执行
-        /// </summary>
-        private async Task ExecuteStepOverAsync()
-        {
-            await _debugger.StepOverAsync();
-        }
-
-        /// <summary>
-        /// 继续执行
-        /// </summary>
-        private async Task ExecuteContinueAsync()
-        {
-            await _debugger.ContinueAsync();
-        }
-
-        /// <summary>
-        /// 当前行变化事件处理
-        /// </summary>
-        private void OnDebuggerCurrentLineChanged(int line)
-        {
-            CurrentDebugLine = line;
-            DebugLineChanged?.Invoke(line);
-        }
-
-        /// <summary>
-        /// 断点命中事件处理
-        /// </summary>
-        private void OnDebuggerBreakpointHit(int line)
-        {
-            AppendOutput($"● 断点命中: 第 {line} 行");
-        }
-
-        /// <summary>
-        /// 调试会话结束事件处理
-        /// </summary>
-        private void OnDebugSessionEnded()
-        {
-            IsDebugging = false;
-            CurrentDebugLine = -1;
-            DebugLineChanged?.Invoke(-1);
-            AppendOutput("=== 调试完成 ===");
-        }
-
-        /// <summary>
-        /// 变量更新事件处理
-        /// </summary>
-        private void OnVariablesUpdated(Dictionary<string, object> variables)
-        {
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine("变量:");
-            foreach (var kvp in variables)
-            {
-                sb.AppendLine($"  {kvp.Key} = {kvp.Value}");
-            }
-            VariablesText = sb.ToString();
-        }
-
-        /// <summary>
+//        private async void ExecuteStartDebug()
+//        {
+//            try
+//            {
+//                Output = "";
+//                AppendOutput("=== 开始调试 (PDB 增强版) ===");
+//
+//                // 从当前活动编辑器获取断点
+//                var breakpoints = GetBreakpointsFromUI?.Invoke() ?? new List<int>();
+//                _debugger.SetBreakpoints(breakpoints);
+//
+//                AppendOutput($"设置了 {breakpoints.Count} 个断点: {string.Join(", ", breakpoints)}");
+//
+//                // 先保存当前编辑器中的代码（如果有修改）
+//                if (IsModified && !string.IsNullOrEmpty(CurrentFilePath))
+//                {
+//                    AppendOutput("检测到未保存的修改，自动保存中...");
+//                    ExecuteSave();
+//                }
+//
+//                string projectDirectory = GetProjectDirectory();
+//
+//                // 检查是否有其他依赖文件（同目录下的其他 .cs 文件）
+//                bool hasOtherCsFiles = !string.IsNullOrEmpty(projectDirectory) &&
+//                                      Directory.Exists(projectDirectory) &&
+//                                      Directory.GetFiles(projectDirectory, "*.cs").Length > 1;
+//
+//                AppendOutput($"调试文件: {CurrentFileName}");
+//
+//                var codeFiles = new Dictionary<string, string>();
+//
+//                if (hasOtherCsFiles)
+//                {
+//                    // 多文件模式：加载所有文件以满足依赖，但只调试当前文件
+//                    AppendOutput($"检测到项目目录中有其他文件，加载依赖文件...");
+//
+//                    var csFiles = Directory.GetFiles(projectDirectory, "*.cs", SearchOption.AllDirectories);
+//                    foreach (var filePath in csFiles)
+//                    {
+//                        var fileName = Path.GetFileName(filePath);
+//
+//                        // 当前文件使用编辑器中的代码（可能有未保存的修改）
+//                        if (fileName.Equals(CurrentFileName, StringComparison.OrdinalIgnoreCase))
+//                        {
+//                            codeFiles[fileName] = Code;
+//                            AppendOutput($"  [主] {fileName}");
+//                        }
+//                        else
+//                        {
+//                            // 其他文件从磁盘读取
+//                            var fileCode = File.ReadAllText(filePath);
+//                            codeFiles[fileName] = fileCode;
+//                            AppendOutput($"  [依赖] {fileName}");
+//                        }
+//                    }
+//                }
+//                else
+//                {
+//                    // 单文件模式：只有当前文件
+//                    codeFiles[CurrentFileName] = Code;
+//                }
+//
+//                // 设置工作流参数（从 UI 获取）
+//                var debugArguments = new Dictionary<string, object>();
+//                if (CurrentWorkflowSignature?.HasCustomParameters == true)
+//                {
+//                    foreach (var param in CurrentWorkflowSignature.InputParameters)
+//                    {
+//                        if (_workflowArguments.TryGetValue(param.Name, out var stringValue))
+//                        {
+//                            debugArguments[param.Name] = _parameterService.ConvertValue(stringValue, param.ParameterType);
+//                        }
+//                        else if (param.HasDefaultValue)
+//                        {
+//                            debugArguments[param.Name] = param.DefaultValue;
+//                        }
+//                    }
+//                }
+//                _debugger.SetWorkflowArguments(debugArguments);
+//
+//                // 启动调试：PDB 增强版会自动进行智能插桩
+//                // 明确指定当前文件为主调试对象
+//                bool success = await _debugger.StartDebuggingAsync(codeFiles, _compiler, CurrentFileName);
+//
+//                if (success)
+//                {
+//                    IsDebugging = true;
+//                    AppendOutput("✓ 调试启动成功");
+//                }
+//                else
+//                {
+//                    AppendOutput("[错误] 调试启动失败");
+//                    IsDebugging = false;
+//                }
+//            }
+//            catch (Exception ex)
+//            {
+//                LoggingService.Instance.Error("MainViewModel", "启动调试失败", ex);
+//                AppendOutput($"[错误] {ex.Message}");
+//                if (ex.InnerException != null)
+//                {
+//                    AppendOutput($"[内部错误] {ex.InnerException.Message}");
+//                }
+//                IsDebugging = false;
+//            }
+//        }
+//
+//        /// <summary>
+//        /// 停止调试
+//        /// </summary>
+//        private void ExecuteStopDebug()
+//        {
+//            _debugger.StopDebugging();
+//            IsDebugging = false;
+//            AppendOutput("=== 调试已停止 ===");
+//        }
+//
+//        /// <summary>
+//        /// 单步执行
+//        /// </summary>
+//        private async Task ExecuteStepOverAsync()
+//        {
+//            await _debugger.StepOverAsync();
+//        }
+//
+//        /// <summary>
+//        /// 继续执行
+//        /// </summary>
+//        private async Task ExecuteContinueAsync()
+//        {
+//            await _debugger.ContinueAsync();
+//        }
+//
+//        /// <summary>
+//        /// 当前行变化事件处理
+//        /// </summary>
+//        private void OnDebuggerCurrentLineChanged(int line)
+//        {
+//            CurrentDebugLine = line;
+//            DebugLineChanged?.Invoke(line);
+//        }
+//
+//        /// <summary>
+//        /// 断点命中事件处理
+//        /// </summary>
+//        private void OnDebuggerBreakpointHit(int line)
+//        {
+//            AppendOutput($"● 断点命中: 第 {line} 行");
+//        }
+//
+//        /// <summary>
+//        /// 调试会话结束事件处理
+//        /// </summary>
+//        private void OnDebugSessionEnded()
+//        {
+//            IsDebugging = false;
+//            CurrentDebugLine = -1;
+//            DebugLineChanged?.Invoke(-1);
+//            AppendOutput("=== 调试完成 ===");
+//        }
+//
+//        /// <summary>
+//        /// 变量更新事件处理
+//        /// </summary>
+//        private void OnVariablesUpdated(Dictionary<string, object> variables)
+//        {
+//            var sb = new System.Text.StringBuilder();
+//            sb.AppendLine("变量:");
+//            foreach (var kvp in variables)
+//            {
+//                sb.AppendLine($"  {kvp.Key} = {kvp.Value}");
+//            }
+//            VariablesText = sb.ToString();
+//        }
+//
+//        /// <summary>
         /// 从 UI 获取断点的委托（由 MainWindow 设置）
         /// </summary>
         public Func<List<int>> GetBreakpointsFromUI { get; set; }
@@ -1083,7 +1074,7 @@ public class SampleWorkflow : CodedWorkflowBase
         #region 项目管理
 
         /// <summary>
-        /// 加载项目到文件树
+        /// 加载项目到文件树（委托给 ProjectManagementViewModel）
         /// </summary>
         public void LoadProject(string projectPath)
         {
@@ -1095,16 +1086,14 @@ public class SampleWorkflow : CodedWorkflowBase
                     return;
                 }
 
-                CurrentProjectPath = projectPath;
+                _projectManagement.LoadProject(projectPath);
                 _currentProject = ProjectService.OpenProject(projectPath);
-
-                // 加载文件树
-                RefreshProjectTree();
 
                 AppendOutput($"[项目] 已加载项目: {_currentProject.Name}");
             }
             catch (Exception ex)
             {
+                LoggingService.Instance.Error("MainViewModel", "加载项目失败", ex);
                 AppendOutput($"[错误] 加载项目失败: {ex.Message}");
             }
         }
@@ -1192,6 +1181,60 @@ public class SampleWorkflow : CodedWorkflowBase
                 }
             }
             return null;
+        }
+
+        #endregion
+
+        #region 子 ViewModel 事件处理
+
+        /// <summary>
+        /// 监听 FileManagementViewModel 的属性变化
+        /// </summary>
+        private void OnFileManagementPropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            // 转发相关属性的变化通知
+            switch (e.PropertyName)
+            {
+                case nameof(FileManagementViewModel.CurrentFilePath):
+                    OnPropertyChanged(nameof(CurrentFilePath));
+                    OnPropertyChanged(nameof(CurrentFileName));
+                    OnPropertyChanged(nameof(WindowTitle));
+                    break;
+                case nameof(FileManagementViewModel.IsModified):
+                    OnPropertyChanged(nameof(IsModified));
+                    OnPropertyChanged(nameof(WindowTitle));
+                    break;
+                case nameof(FileManagementViewModel.Code):
+                    OnPropertyChanged(nameof(Code));
+                    AnalyzeWorkflowSignature();
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 文件加载完成事件
+        /// </summary>
+        private void OnFileLoaded(string filePath)
+        {
+            LoggingService.Instance.Info("MainViewModel", $"文件加载完成: {filePath}");
+            AnalyzeWorkflowSignature();
+        }
+
+        /// <summary>
+        /// 文件保存完成事件
+        /// </summary>
+        private void OnFileSaved(string filePath)
+        {
+            LoggingService.Instance.Info("MainViewModel", $"文件保存完成: {filePath}");
+        }
+
+        /// <summary>
+        /// 项目树中文件被选中事件
+        /// </summary>
+        private void OnFileSelected(string filePath)
+        {
+            LoggingService.Instance.Info("MainViewModel", $"选中文件: {filePath}");
+            _fileManagement.LoadFile(filePath);
         }
 
         #endregion

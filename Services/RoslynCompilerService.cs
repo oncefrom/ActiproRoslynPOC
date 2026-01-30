@@ -4,10 +4,12 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Emit;
 using Microsoft.CodeAnalysis.Text;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace ActiproRoslynPOC.Services
@@ -15,6 +17,10 @@ namespace ActiproRoslynPOC.Services
     public class RoslynCompilerService
     {
         private readonly List<MetadataReference> _defaultReferences;
+
+        // 编译缓存：key 为代码内容的 Hash，value 为编译结果
+        private static readonly ConcurrentDictionary<string, CompilationResult> _compilationCache
+            = new ConcurrentDictionary<string, CompilationResult>();
 
         public RoslynCompilerService()
         {
@@ -125,21 +131,48 @@ namespace ActiproRoslynPOC.Services
         //}
 
         /// <summary>
-        /// 编译单个文件（已有方法，保持不变）
+        /// 编译单个文件（带缓存）
         /// </summary>
         public CompilationResult Compile(string code, string assemblyName = "DynamicWorkflow")
         {
+            var cacheKey = ComputeHash(code + assemblyName);
+
+            if (_compilationCache.TryGetValue(cacheKey, out var cached))
+            {
+                System.Diagnostics.Debug.WriteLine($"[RoslynCompilerService] 命中缓存: {cacheKey.Substring(0, 8)}...");
+                return cached;
+            }
+
             var syntaxTree = CSharpSyntaxTree.ParseText(code);
-            return CompileInternal(new[] { syntaxTree }, assemblyName);
+            var result = CompileInternal(new[] { syntaxTree }, assemblyName);
+
+            if (result.Success)
+            {
+                _compilationCache.TryAdd(cacheKey, result);
+                System.Diagnostics.Debug.WriteLine($"[RoslynCompilerService] 添加缓存: {cacheKey.Substring(0, 8)}...");
+            }
+
+            return result;
         }
 
         /// <summary>
-        /// 编译多个文件（新增）
+        /// 编译多个文件（带缓存）
         /// </summary>
         public CompilationResult CompileMultiple(
             Dictionary<string, string> codeFiles,
             string assemblyName = "DynamicWorkflow")
         {
+            // 计算所有文件内容的组合 Hash
+            var combinedContent = string.Join("\n===FILE===\n",
+                codeFiles.OrderBy(k => k.Key).Select(k => k.Key + ":" + k.Value));
+            var cacheKey = ComputeHash(combinedContent + assemblyName);
+
+            if (_compilationCache.TryGetValue(cacheKey, out var cached))
+            {
+                System.Diagnostics.Debug.WriteLine($"[RoslynCompilerService] 命中缓存: {cacheKey.Substring(0, 8)}...");
+                return cached;
+            }
+
             var syntaxTrees = new List<SyntaxTree>();
 
             foreach (var kvp in codeFiles)
@@ -155,7 +188,15 @@ namespace ActiproRoslynPOC.Services
                 syntaxTrees.Add(syntaxTree);
             }
 
-            return CompileInternal(syntaxTrees, assemblyName);
+            var result = CompileInternal(syntaxTrees, assemblyName);
+
+            if (result.Success)
+            {
+                _compilationCache.TryAdd(cacheKey, result);
+                System.Diagnostics.Debug.WriteLine($"[RoslynCompilerService] 添加缓存: {cacheKey.Substring(0, 8)}...");
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -251,5 +292,32 @@ namespace ActiproRoslynPOC.Services
             }
             return result;
         }
+
+        /// <summary>
+        /// 计算字符串的 SHA256 Hash
+        /// </summary>
+        private static string ComputeHash(string content)
+        {
+            using (var sha256 = SHA256.Create())
+            {
+                var bytes = Encoding.UTF8.GetBytes(content);
+                var hash = sha256.ComputeHash(bytes);
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        /// <summary>
+        /// 清除编译缓存（可选：用于用户手动刷新）
+        /// </summary>
+        public static void ClearCache()
+        {
+            _compilationCache.Clear();
+            System.Diagnostics.Debug.WriteLine("[RoslynCompilerService] 缓存已清除");
+        }
+
+        /// <summary>
+        /// 获取当前缓存数量
+        /// </summary>
+        public static int CacheCount => _compilationCache.Count;
     }
 }

@@ -716,16 +716,16 @@ namespace ActiproRoslynPOC
                 ModifierKeys.None));
 
             // Shift+F5 停止调试
-            InputBindings.Add(new KeyBinding(_viewModel.StopDebugCommand, Key.F5, ModifierKeys.Shift));
+            //InputBindings.Add(new KeyBinding(_viewModel.StopDebugCommand, Key.F5, ModifierKeys.Shift));
 
             // F8 语法检查
             InputBindings.Add(new KeyBinding(_viewModel.CheckSyntaxCommand, Key.F8, ModifierKeys.None));
 
             // F9 开始调试
-            InputBindings.Add(new KeyBinding(_viewModel.StartDebugCommand, Key.F9, ModifierKeys.None));
+            //InputBindings.Add(new KeyBinding(_viewModel.StartDebugCommand, Key.F9, ModifierKeys.None));
 
             // F10 单步执行
-            InputBindings.Add(new KeyBinding(_viewModel.StepOverCommand, Key.F10, ModifierKeys.None));
+            //InputBindings.Add(new KeyBinding(_viewModel.StepOverCommand, Key.F10, ModifierKeys.None));
 
             // Ctrl+S 保存
             InputBindings.Add(new KeyBinding(
